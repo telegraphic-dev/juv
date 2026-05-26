@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use doj::{
-    build_java, clear_cache, default_cache_dir, init_script, run_java, split_directive_words,
-    BuildOptions, InitOptions, RunOptions,
+    build_java, cache_entries, clear_cache, default_cache_dir, init_script, run_java,
+    split_directive_words, BuildOptions, InitOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -127,10 +127,28 @@ struct CacheCommand {
 enum CacheSubcommand {
     /// Clear the doj cache directory.
     Clear(CacheClearCommand),
+    /// Print the effective doj cache directory.
+    Path(CachePathCommand),
+    /// List cached script entries.
+    List(CacheListCommand),
 }
 
 #[derive(Parser, Debug)]
 struct CacheClearCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct CachePathCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct CacheListCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
@@ -152,6 +170,24 @@ enum InfoSubcommand {
     Docs(InfoDocsCommand),
     /// Print the effective doj cache directory.
     Cache(InfoCacheCommand),
+    /// Print effective main class.
+    Main(InfoScriptCommand),
+    /// Print requested Java version.
+    Java(InfoScriptCommand),
+    /// Print script description.
+    Description(InfoScriptCommand),
+    /// Print Maven GAV.
+    Gav(InfoScriptCommand),
+    /// Print Java module name.
+    Module(InfoScriptCommand),
+    /// Print dependency directives.
+    Deps(InfoScriptCommand),
+    /// Print repository directives.
+    Repos(InfoScriptCommand),
+    /// Print source directives.
+    Sources(InfoScriptCommand),
+    /// Print file/resource directives.
+    Files(InfoScriptCommand),
     /// Print parsed JBang directives.
     Directives(InfoDirectivesCommand),
 }
@@ -230,6 +266,12 @@ struct InfoCacheCommand {
 }
 
 #[derive(Parser, Debug)]
+struct InfoScriptCommand {
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
 struct InfoDirectivesCommand {
     /// Java source file.
     script: PathBuf,
@@ -266,6 +308,34 @@ fn docs_json(values: &[doj::KeyValue]) -> serde_json::Value {
         }
     }
     serde_json::Value::Object(map)
+}
+
+fn print_lines(values: &[String]) {
+    for value in values {
+        println!("{value}");
+    }
+}
+
+fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
+    let Some(value) = value else {
+        anyhow::bail!("{missing}");
+    };
+    println!("{value}");
+    Ok(())
+}
+
+fn parsed_directives(script: &PathBuf) -> Result<doj::Directives> {
+    let source = fs::read_to_string(script)?;
+    Ok(doj::parse_directives(&source))
+}
+
+fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
+    let cache_dir = match cache_dir {
+        Some(path) => path,
+        None => default_cache_dir()?,
+    };
+    println!("{}", cache_dir.display());
+    Ok(())
 }
 
 fn tools_payload(script: &std::path::Path, output: &doj::BuildOutput) -> serde_json::Value {
@@ -345,6 +415,21 @@ fn main() -> Result<()> {
                 clear_cache(clear.cache_dir.as_deref())?;
                 0
             }
+            CacheSubcommand::Path(path) => {
+                print_cache_path(path.cache_dir)?;
+                0
+            }
+            CacheSubcommand::List(list) => {
+                for entry in cache_entries(list.cache_dir.as_deref())? {
+                    println!(
+                        "{}\t{}\t{}",
+                        entry.script.display(),
+                        entry.classes_dir.display(),
+                        entry.cache_dir.display()
+                    );
+                }
+                0
+            }
         },
         Some(Commands::Info(cmd)) => match cmd.command {
             InfoSubcommand::Classpath(cmd) => {
@@ -408,11 +493,61 @@ fn main() -> Result<()> {
                 0
             }
             InfoSubcommand::Cache(cmd) => {
-                let cache_dir = match cmd.cache_dir {
-                    Some(path) => path,
-                    None => default_cache_dir()?,
-                };
-                println!("{}", cache_dir.display());
+                print_cache_path(cmd.cache_dir)?;
+                0
+            }
+            InfoSubcommand::Main(cmd) => {
+                let source = fs::read_to_string(&cmd.script)?;
+                let main = doj::parse_directives(&source)
+                    .main_class
+                    .or_else(|| doj::infer_main_class_from_source(&cmd.script, &source));
+                print_required(main.as_deref(), "could not infer main class; add //MAIN")?;
+                0
+            }
+            InfoSubcommand::Java(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_required(
+                    directives.java_version.as_deref(),
+                    "no //JAVA directive found",
+                )?;
+                0
+            }
+            InfoSubcommand::Description(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_required(
+                    directives.description.as_deref(),
+                    "no //DESCRIPTION directive found",
+                )?;
+                0
+            }
+            InfoSubcommand::Gav(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_required(directives.gav.as_deref(), "no //GAV directive found")?;
+                0
+            }
+            InfoSubcommand::Module(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_required(directives.module.as_deref(), "no //MODULE directive found")?;
+                0
+            }
+            InfoSubcommand::Deps(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.deps);
+                0
+            }
+            InfoSubcommand::Repos(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.repos);
+                0
+            }
+            InfoSubcommand::Sources(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.sources);
+                0
+            }
+            InfoSubcommand::Files(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.files);
                 0
             }
             InfoSubcommand::Directives(cmd) => {

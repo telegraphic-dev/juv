@@ -86,6 +86,13 @@ pub struct InitOptions {
     pub force: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    pub script: PathBuf,
+    pub classes_dir: PathBuf,
+    pub cache_dir: PathBuf,
+}
+
 pub fn init_script(options: InitOptions) -> Result<PathBuf> {
     if options.script.exists() && !options.force {
         return Err(anyhow!(
@@ -141,6 +148,44 @@ pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
             .with_context(|| format!("failed to clear cache {}", root.display()))?;
     }
     Ok(())
+}
+
+pub fn cache_entries(cache_dir: Option<&Path>) -> Result<Vec<CacheEntry>> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    };
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let cache_dir = entry.path();
+        let metadata = cache_dir.join("cache-entry.tsv");
+        if !metadata.exists() {
+            continue;
+        }
+        let text = fs::read_to_string(&metadata)?;
+        let mut parts = text.trim_end().split('\t');
+        let Some(script) = parts.next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let Some(classes_dir) = parts.next().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        entries.push(CacheEntry {
+            script: PathBuf::from(script),
+            classes_dir: PathBuf::from(classes_dir),
+            cache_dir,
+        });
+    }
+    entries.sort_by(|a, b| a.script.cmp(&b.script));
+    Ok(entries)
 }
 
 fn render_default_init_script(base_name: &str, options: &InitOptions) -> String {
@@ -333,11 +378,12 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     }
 
     copy_declared_files(base_dir, &classes_dir, &directives.files)?;
+    write_cache_entry(&work_dir, &script, &classes_dir)?;
 
     let main_class = directives
         .main_class
         .clone()
-        .or_else(|| infer_main_class(&script, &source));
+        .or_else(|| infer_main_class_from_source(&script, &source));
 
     Ok(BuildOutput {
         classes_dir,
@@ -564,7 +610,15 @@ fn copy_resource_file(source: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn infer_main_class(script: &Path, source: &str) -> Option<String> {
+fn write_cache_entry(work_dir: &Path, script: &Path, classes_dir: &Path) -> Result<()> {
+    fs::write(
+        work_dir.join("cache-entry.tsv"),
+        format!("{}\t{}\n", script.display(), classes_dir.display()),
+    )?;
+    Ok(())
+}
+
+pub fn infer_main_class_from_source(script: &Path, source: &str) -> Option<String> {
     let simple_name = script
         .file_stem()
         .and_then(|s| s.to_str())
