@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use doj::{
-    build_java, init_script, run_java, split_directive_words, BuildOptions, InitOptions, RunOptions,
+    build_java, clear_cache, init_script, run_java, split_directive_words, BuildOptions,
+    InitOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -28,6 +29,8 @@ enum Commands {
     Build(BuildCommand),
     /// Initialize a Java script.
     Init(InitCommand),
+    /// Manage compiled script cache.
+    Cache(CacheCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
 }
@@ -115,6 +118,25 @@ struct InitCommand {
 }
 
 #[derive(Parser, Debug)]
+struct CacheCommand {
+    #[command(subcommand)]
+    command: CacheSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum CacheSubcommand {
+    /// Clear the doj cache directory.
+    Clear(CacheClearCommand),
+}
+
+#[derive(Parser, Debug)]
+struct CacheClearCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
 struct InfoCommand {
     /// Java source file.
     script: PathBuf,
@@ -162,6 +184,12 @@ fn main() -> Result<()> {
             })?;
             0
         }
+        Some(Commands::Cache(cmd)) => match cmd.command {
+            CacheSubcommand::Clear(clear) => {
+                clear_cache(clear.cache_dir.as_deref())?;
+                0
+            }
+        },
         Some(Commands::Info(cmd)) => {
             let source = std::fs::read_to_string(&cmd.script)?;
             println!("{:#?}", doj::parse_directives(&source));

@@ -96,6 +96,24 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
     Ok(options.script)
 }
 
+pub fn default_cache_dir() -> Result<PathBuf> {
+    Ok(dirs::cache_dir()
+        .ok_or_else(|| anyhow!("could not determine cache directory"))?
+        .join("doj"))
+}
+
+pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    };
+    if root.exists() {
+        fs::remove_dir_all(&root)
+            .with_context(|| format!("failed to clear cache {}", root.display()))?;
+    }
+    Ok(())
+}
+
 fn render_default_init_script(base_name: &str, options: &InitOptions) -> String {
     let mut out = String::from("///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n");
     if let Some(version) = &options.java_version {
@@ -328,9 +346,7 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
 fn cache_project_dir(cache_dir: Option<&Path>, script: &Path, source: &str) -> Result<PathBuf> {
     let root = match cache_dir {
         Some(path) => path.to_path_buf(),
-        None => dirs::cache_dir()
-            .unwrap_or_else(|| PathBuf::from(".cache"))
-            .join("doj"),
+        None => default_cache_dir()?,
     };
     let mut hasher = Sha256::new();
     hasher.update(script.to_string_lossy().as_bytes());
