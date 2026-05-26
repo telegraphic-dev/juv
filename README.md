@@ -10,6 +10,8 @@ Implemented now:
 
 - `doj run <script.java> [args...]`
 - `doj build <script.java>`
+- `doj init <script.java>` default Java template generation
+- `doj cache clear`
 - `doj <script.java> [args...]` JBang-style shorthand
 - directive parsing for:
   - `//JAVA`
@@ -24,6 +26,8 @@ Implemented now:
   - `//DESCRIPTION`
 - compile/run cache under the OS cache directory
 - `doj build` compiles scripts into cache without running them
+- `doj init` creates default Java scripts, supports `--deps`, `--java`, and `--force`
+- `doj cache clear` clears the compiled-script cache
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
