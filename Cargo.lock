@@ -192,6 +192,7 @@ dependencies = [
  "clap",
  "dirs",
  "regex",
+ "serde_json",
  "sha2",
  "tempfile",
  "walkdir",

@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use doj::{
-    build_java, clear_cache, init_script, run_java, split_directive_words, BuildOptions,
-    InitOptions, RunOptions,
+    build_java, clear_cache, default_cache_dir, init_script, run_java, split_directive_words,
+    BuildOptions, InitOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -146,6 +146,12 @@ struct InfoCommand {
 enum InfoSubcommand {
     /// Print classpath used by the script.
     Classpath(InfoClasspathCommand),
+    /// Print a json description for tools/IDEs.
+    Tools(InfoToolsCommand),
+    /// Print documentation references declared by the script.
+    Docs(InfoDocsCommand),
+    /// Print the effective doj cache directory.
+    Cache(InfoCacheCommand),
     /// Print parsed JBang directives.
     Directives(InfoDirectivesCommand),
 }
@@ -181,9 +187,115 @@ struct InfoClasspathCommand {
 }
 
 #[derive(Parser, Debug)]
+struct InfoToolsCommand {
+    /// Select a single field from the tools JSON payload.
+    #[arg(long = "select")]
+    select: Option<String>,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(long = "javac-option")]
+    javac_options: Vec<String>,
+
+    /// Override //MAIN / inferred class name.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct InfoDocsCommand {
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct InfoCacheCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
 struct InfoDirectivesCommand {
     /// Java source file.
     script: PathBuf,
+}
+
+fn repo_json(repo: &str) -> serde_json::Value {
+    match repo.split_once('=') {
+        Some((id, url)) => serde_json::json!({ "id": id, "url": url }),
+        None => serde_json::json!({ "id": null, "url": repo }),
+    }
+}
+
+fn key_values_json(values: &[doj::KeyValue]) -> serde_json::Value {
+    serde_json::Value::Array(
+        values
+            .iter()
+            .map(|kv| serde_json::json!({ "key": kv.key, "value": kv.value }))
+            .collect(),
+    )
+}
+
+fn docs_json(values: &[doj::KeyValue]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for kv in values {
+        let (id, target) = match &kv.value {
+            Some(value) => (kv.key.clone(), value.clone()),
+            None => ("main".to_string(), kv.key.clone()),
+        };
+        let entry = map
+            .entry(id)
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+        if let serde_json::Value::Array(items) = entry {
+            items.push(serde_json::json!({ "originalResource": target }));
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+fn tools_payload(script: &std::path::Path, output: &doj::BuildOutput) -> serde_json::Value {
+    let directives = &output.directives;
+    serde_json::json!({
+        "originalResource": script.to_string_lossy(),
+        "backingResource": script.to_string_lossy(),
+        "applicationClassesDir": output.classes_dir.to_string_lossy(),
+        "applicationJar": null,
+        "mainClass": &output.main_class,
+        "dependencies": &directives.deps,
+        "repositories": directives.repos.iter().map(|repo| repo_json(repo)).collect::<Vec<_>>(),
+        "resolvedDependencies": output.classpath.iter().map(|path| path.to_string_lossy().to_string()).collect::<Vec<_>>(),
+        "javaVersion": &directives.java_version,
+        "requestedJavaVersion": &directives.java_version,
+        "compileOptions": &directives.javac_options,
+        "runtimeOptions": &directives.runtime_options,
+        "nativeOptions": &directives.native_options,
+        "javaAgents": key_values_json(&directives.java_agents),
+        "manifestOptions": key_values_json(&directives.manifest_options),
+        "files": &directives.files,
+        "sources": &directives.sources,
+        "description": &directives.description,
+        "gav": &directives.gav,
+        "module": &directives.module,
+        "docs": docs_json(&directives.docs),
+        "enablePreview": directives.enable_preview,
+        "enableCds": directives.enable_cds,
+        "disableIntegrations": directives.disable_integrations,
+    })
 }
 
 fn main() -> Result<()> {
@@ -249,6 +361,58 @@ fn main() -> Result<()> {
                     entries.insert(0, output.classes_dir);
                 }
                 println!("{}", std::env::join_paths(entries)?.to_string_lossy());
+                0
+            }
+            InfoSubcommand::Tools(cmd) => {
+                let script = std::fs::canonicalize(&cmd.script)?;
+                let output = build_java(BuildOptions {
+                    script: script.clone(),
+                    extra_deps: cmd.deps,
+                    classpath: cmd.classpath,
+                    javac_options: cmd.javac_options,
+                    main_class: cmd.main_class,
+                    cache_dir: cmd.cache_dir,
+                })?;
+                let payload = tools_payload(&script, &output);
+                if let Some(field) = cmd.select {
+                    let Some(value) = payload.get(&field) else {
+                        anyhow::bail!("Cannot return value of unknown field: {field}");
+                    };
+                    if value.is_null() {
+                        anyhow::bail!("field {field} is null");
+                    }
+                    if let Some(text) = value.as_str() {
+                        println!("{text}");
+                    } else {
+                        println!("{}", serde_json::to_string_pretty(value)?);
+                    }
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&payload)?);
+                }
+                0
+            }
+            InfoSubcommand::Docs(cmd) => {
+                let source = std::fs::read_to_string(&cmd.script)?;
+                let directives = doj::parse_directives(&source);
+                if let Some(description) = directives.description {
+                    println!("{description}");
+                }
+                for doc in directives.docs {
+                    let (id, target) = match doc.value {
+                        Some(value) => (doc.key, value),
+                        None => ("main".to_string(), doc.key),
+                    };
+                    println!("{id}:");
+                    println!("  {target}");
+                }
+                0
+            }
+            InfoSubcommand::Cache(cmd) => {
+                let cache_dir = match cmd.cache_dir {
+                    Some(path) => path,
+                    None => default_cache_dir()?,
+                };
+                println!("{}", cache_dir.display());
                 0
             }
             InfoSubcommand::Directives(cmd) => {

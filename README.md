@@ -13,6 +13,9 @@ Implemented now:
 - `doj init <script.java>` default Java template generation
 - `doj cache clear`
 - `doj info classpath <script.java>`
+- `doj info tools <script.java>` with `--select`
+- `doj info docs <script.java>`
+- `doj info cache [--cache-dir ...]`
 - `doj <script.java> [args...]` JBang-style shorthand
 - directive parsing for:
   - `//JAVA`
@@ -25,11 +28,22 @@ Implemented now:
   - `//RUNTIME_OPTIONS` / `//JAVA_OPTIONS`
   - `//MAIN`
   - `//DESCRIPTION`
+  - `//GAV`
+  - `//MODULE`
+  - `//DOCS`
+  - `//MANIFEST`
+  - `//JAVAAGENT`
+  - `//NATIVE_OPTIONS`
+  - `//CDS`
+  - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `doj build` compiles scripts into cache without running them
 - `doj init` creates default Java scripts, supports `--deps`, `--java`, and `--force`
 - `doj cache clear` clears the compiled-script cache
 - `doj info classpath` prints the script runtime classpath, with `--deps-only`
+- `doj info tools` prints JSON metadata for tooling and supports selecting a single field
+- `doj info docs` prints description and documentation references
+- `doj info cache` prints the effective cache directory
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies

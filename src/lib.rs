@@ -6,6 +6,27 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeyValue {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+impl KeyValue {
+    pub fn parse(text: &str) -> Self {
+        match text.split_once('=') {
+            Some((key, value)) => Self {
+                key: key.to_string(),
+                value: Some(value.to_string()),
+            },
+            None => Self {
+                key: text.to_string(),
+                value: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Directives {
     pub deps: Vec<String>,
     pub repos: Vec<String>,
@@ -13,10 +34,18 @@ pub struct Directives {
     pub files: Vec<String>,
     pub javac_options: Vec<String>,
     pub runtime_options: Vec<String>,
+    pub native_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub manifest_options: Vec<KeyValue>,
+    pub docs: Vec<KeyValue>,
     pub java_version: Option<String>,
     pub main_class: Option<String>,
+    pub module: Option<String>,
+    pub gav: Option<String>,
     pub description: Option<String>,
     pub enable_preview: bool,
+    pub enable_cds: bool,
+    pub disable_integrations: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -172,8 +201,22 @@ pub fn parse_directives(source: &str) -> Directives {
             "RUNTIME_OPTIONS" | "JAVA_OPTIONS" => {
                 directives.runtime_options.extend(split_space_words(value))
             }
+            "NATIVE_OPTIONS" => directives.native_options.extend(split_space_words(value)),
+            "JAVAAGENT" => directives.java_agents.extend(
+                split_space_words(value)
+                    .iter()
+                    .map(|word| KeyValue::parse(word)),
+            ),
+            "MANIFEST" => directives.manifest_options.extend(
+                split_space_words(value)
+                    .iter()
+                    .map(|word| KeyValue::parse(word)),
+            ),
+            "DOCS" => directives.docs.push(KeyValue::parse(value)),
             "JAVA" => directives.java_version = Some(value.to_string()),
             "MAIN" => directives.main_class = Some(value.to_string()),
+            "MODULE" => directives.module = Some(value.to_string()),
+            "GAV" => directives.gav = Some(value.to_string()),
             "DESCRIPTION" => {
                 directives.description = Some(match directives.description.take() {
                     Some(existing) => format!("{existing}\n{value}"),
@@ -181,6 +224,8 @@ pub fn parse_directives(source: &str) -> Directives {
                 });
             }
             "PREVIEW" => directives.enable_preview = true,
+            "CDS" => directives.enable_cds = true,
+            "NOINTEGRATIONS" => directives.disable_integrations = true,
             _ => {}
         }
     }
