@@ -53,9 +53,14 @@ pub struct RunOptions {
     pub script: PathBuf,
     pub script_args: Vec<String>,
     pub extra_deps: Vec<String>,
+    pub extra_repos: Vec<String>,
+    pub extra_sources: Vec<String>,
+    pub extra_files: Vec<String>,
     pub classpath: Vec<PathBuf>,
     pub javac_options: Vec<String>,
     pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub java_version: Option<String>,
     pub main_class: Option<String>,
     pub cache_dir: Option<PathBuf>,
 }
@@ -64,8 +69,14 @@ pub struct RunOptions {
 pub struct BuildOptions {
     pub script: PathBuf,
     pub extra_deps: Vec<String>,
+    pub extra_repos: Vec<String>,
+    pub extra_sources: Vec<String>,
+    pub extra_files: Vec<String>,
     pub classpath: Vec<PathBuf>,
     pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub java_version: Option<String>,
     pub main_class: Option<String>,
     pub cache_dir: Option<PathBuf>,
 }
@@ -319,7 +330,15 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
         .with_context(|| format!("failed to read {}", script.display()))?;
     let mut directives = parse_directives(&source);
     directives.deps.extend(options.extra_deps);
+    directives.repos.extend(options.extra_repos);
+    directives.sources.extend(options.extra_sources);
+    directives.files.extend(options.extra_files);
     directives.javac_options.extend(options.javac_options);
+    directives.runtime_options.extend(options.runtime_options);
+    directives.java_agents.extend(options.java_agents);
+    if options.java_version.is_some() {
+        directives.java_version = options.java_version;
+    }
     if options.main_class.is_some() {
         directives.main_class = options.main_class;
     }
@@ -399,8 +418,14 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     let build = build_java(BuildOptions {
         script: options.script,
         extra_deps: options.extra_deps,
+        extra_repos: options.extra_repos,
+        extra_sources: options.extra_sources,
+        extra_files: options.extra_files,
         classpath: options.classpath,
         javac_options: options.javac_options,
+        runtime_options: Vec::new(),
+        java_agents: options.java_agents,
+        java_version: options.java_version,
         main_class: options.main_class,
         cache_dir: options.cache_dir,
     })?;
@@ -413,6 +438,9 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     let mut runtime_cp = vec![build.classes_dir];
     runtime_cp.extend(build.classpath);
     let mut java_cmd = Command::new(&java);
+    for agent in &build.directives.java_agents {
+        java_cmd.arg(format_java_agent(agent));
+    }
     java_cmd.args(&build.directives.runtime_options);
     java_cmd.args(&runtime_options);
     if build.directives.enable_preview
@@ -432,6 +460,13 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         .status()
         .with_context(|| format!("failed to execute {java}"))?;
     Ok(status.code().unwrap_or(1))
+}
+
+fn format_java_agent(agent: &KeyValue) -> String {
+    match &agent.value {
+        Some(value) => format!("-javaagent:{}={}", agent.key, value),
+        None => format!("-javaagent:{}", agent.key),
+    }
 }
 
 fn cache_project_dir(cache_dir: Option<&Path>, script: &Path, source: &str) -> Result<PathBuf> {

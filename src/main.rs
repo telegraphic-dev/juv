@@ -4,7 +4,7 @@ use std::{fs, path::PathBuf};
 
 use doj::{
     build_java, cache_entries, clear_cache, default_cache_dir, init_script, run_java,
-    split_directive_words, BuildOptions, InitOptions, RunOptions,
+    split_directive_words, BuildOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -40,18 +40,45 @@ struct RunCommand {
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
 
     /// Additional classpath entries.
     #[arg(long = "class-path", alias = "cp")]
     classpath: Vec<PathBuf>,
 
     /// Additional javac option.
-    #[arg(long = "javac-option")]
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
     javac_options: Vec<String>,
 
     /// Additional java runtime option.
-    #[arg(long = "runtime-option")]
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
     runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
 
     /// Override //MAIN / inferred class name.
     #[arg(long = "main")]
@@ -74,14 +101,45 @@ struct BuildCommand {
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
 
     /// Additional classpath entries.
     #[arg(long = "class-path", alias = "cp")]
     classpath: Vec<PathBuf>,
 
     /// Additional javac option.
-    #[arg(long = "javac-option")]
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
     javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
 
     /// Override //MAIN / inferred class name.
     #[arg(long = "main")]
@@ -152,6 +210,10 @@ struct CacheListCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
+
+    /// Print cache entries as JSON.
+    #[arg(long = "json")]
+    json: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -188,6 +250,16 @@ enum InfoSubcommand {
     Sources(InfoScriptCommand),
     /// Print file/resource directives.
     Files(InfoScriptCommand),
+    /// Print compile option directives.
+    CompileOptions(InfoScriptCommand),
+    /// Print runtime/java option directives.
+    RuntimeOptions(InfoScriptCommand),
+    /// Print native option directives.
+    NativeOptions(InfoScriptCommand),
+    /// Print java agent directives.
+    Javaagents(InfoScriptCommand),
+    /// Print manifest directives.
+    Manifest(InfoScriptCommand),
     /// Print parsed JBang directives.
     Directives(InfoDirectivesCommand),
 }
@@ -201,14 +273,45 @@ struct InfoClasspathCommand {
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
 
     /// Additional classpath entries.
     #[arg(long = "class-path", alias = "cp")]
     classpath: Vec<PathBuf>,
 
     /// Additional javac option.
-    #[arg(long = "javac-option")]
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
     javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
 
     /// Override //MAIN / inferred class name.
     #[arg(long = "main")]
@@ -231,14 +334,45 @@ struct InfoToolsCommand {
     /// Additional dependency coordinates, same shape as //DEPS.
     #[arg(long = "deps")]
     deps: Vec<String>,
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
 
     /// Additional classpath entries.
     #[arg(long = "class-path", alias = "cp")]
     classpath: Vec<PathBuf>,
 
     /// Additional javac option.
-    #[arg(long = "javac-option")]
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
     javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
 
     /// Override //MAIN / inferred class name.
     #[arg(long = "main")]
@@ -316,6 +450,29 @@ fn print_lines(values: &[String]) {
     }
 }
 
+fn print_key_values(values: &[KeyValue]) {
+    for value in values {
+        match &value.value {
+            Some(v) => println!("{}={}", value.key, v),
+            None => println!("{}", value.key),
+        }
+    }
+}
+
+fn split_cli_words(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|value| split_directive_words(value))
+        .collect()
+}
+
+fn split_cli_key_values(values: &[String]) -> Vec<KeyValue> {
+    split_cli_words(values)
+        .into_iter()
+        .map(|value| KeyValue::parse(&value))
+        .collect()
+}
+
 fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
     let Some(value) = value else {
         anyhow::bail!("{missing}");
@@ -374,19 +531,30 @@ fn main() -> Result<()> {
         Some(Commands::Run(cmd)) => run_java(RunOptions {
             script: cmd.script,
             script_args: cmd.args,
-            extra_deps: cmd.deps,
+            extra_deps: split_cli_words(&cmd.deps),
+            extra_repos: split_cli_words(&cmd.repos),
+            extra_sources: split_cli_words(&cmd.sources),
+            extra_files: split_cli_words(&cmd.files),
             classpath: cmd.classpath,
             javac_options: cmd.javac_options,
             runtime_options: cmd.runtime_options,
+            java_agents: split_cli_key_values(&cmd.java_agents),
+            java_version: cmd.java_version,
             main_class: cmd.main_class,
             cache_dir: cmd.cache_dir,
         })?,
         Some(Commands::Build(cmd)) => {
             build_java(BuildOptions {
                 script: cmd.script,
-                extra_deps: cmd.deps,
+                extra_deps: split_cli_words(&cmd.deps),
+                extra_repos: split_cli_words(&cmd.repos),
+                extra_sources: split_cli_words(&cmd.sources),
+                extra_files: split_cli_words(&cmd.files),
                 classpath: cmd.classpath,
                 javac_options: cmd.javac_options,
+                runtime_options: cmd.runtime_options,
+                java_agents: split_cli_key_values(&cmd.java_agents),
+                java_version: cmd.java_version,
                 main_class: cmd.main_class,
                 cache_dir: cmd.cache_dir,
             })?;
@@ -420,13 +588,28 @@ fn main() -> Result<()> {
                 0
             }
             CacheSubcommand::List(list) => {
-                for entry in cache_entries(list.cache_dir.as_deref())? {
-                    println!(
-                        "{}\t{}\t{}",
-                        entry.script.display(),
-                        entry.classes_dir.display(),
-                        entry.cache_dir.display()
-                    );
+                let entries = cache_entries(list.cache_dir.as_deref())?;
+                if list.json {
+                    let json = entries
+                        .iter()
+                        .map(|entry| {
+                            serde_json::json!({
+                                "script": entry.script.to_string_lossy(),
+                                "classesDir": entry.classes_dir.to_string_lossy(),
+                                "cacheDir": entry.cache_dir.to_string_lossy(),
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                } else {
+                    for entry in entries {
+                        println!(
+                            "{}\t{}\t{}",
+                            entry.script.display(),
+                            entry.classes_dir.display(),
+                            entry.cache_dir.display()
+                        );
+                    }
                 }
                 0
             }
@@ -435,9 +618,15 @@ fn main() -> Result<()> {
             InfoSubcommand::Classpath(cmd) => {
                 let output = build_java(BuildOptions {
                     script: cmd.script,
-                    extra_deps: cmd.deps,
+                    extra_deps: split_cli_words(&cmd.deps),
+                    extra_repos: split_cli_words(&cmd.repos),
+                    extra_sources: split_cli_words(&cmd.sources),
+                    extra_files: split_cli_words(&cmd.files),
                     classpath: cmd.classpath,
                     javac_options: cmd.javac_options,
+                    runtime_options: cmd.runtime_options,
+                    java_agents: split_cli_key_values(&cmd.java_agents),
+                    java_version: cmd.java_version,
                     main_class: cmd.main_class,
                     cache_dir: cmd.cache_dir,
                 })?;
@@ -452,9 +641,15 @@ fn main() -> Result<()> {
                 let script = std::fs::canonicalize(&cmd.script)?;
                 let output = build_java(BuildOptions {
                     script: script.clone(),
-                    extra_deps: cmd.deps,
+                    extra_deps: split_cli_words(&cmd.deps),
+                    extra_repos: split_cli_words(&cmd.repos),
+                    extra_sources: split_cli_words(&cmd.sources),
+                    extra_files: split_cli_words(&cmd.files),
                     classpath: cmd.classpath,
                     javac_options: cmd.javac_options,
+                    runtime_options: cmd.runtime_options,
+                    java_agents: split_cli_key_values(&cmd.java_agents),
+                    java_version: cmd.java_version,
                     main_class: cmd.main_class,
                     cache_dir: cmd.cache_dir,
                 })?;
@@ -550,6 +745,31 @@ fn main() -> Result<()> {
                 print_lines(&directives.files);
                 0
             }
+            InfoSubcommand::CompileOptions(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.javac_options);
+                0
+            }
+            InfoSubcommand::RuntimeOptions(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.runtime_options);
+                0
+            }
+            InfoSubcommand::NativeOptions(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_lines(&directives.native_options);
+                0
+            }
+            InfoSubcommand::Javaagents(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_key_values(&directives.java_agents);
+                0
+            }
+            InfoSubcommand::Manifest(cmd) => {
+                let directives = parsed_directives(&cmd.script)?;
+                print_key_values(&directives.manifest_options);
+                0
+            }
             InfoSubcommand::Directives(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
                 println!("{:#?}", doj::parse_directives(&source));
@@ -565,9 +785,14 @@ fn main() -> Result<()> {
                 script,
                 script_args: cli.args,
                 extra_deps: Vec::new(),
+                extra_repos: Vec::new(),
+                extra_sources: Vec::new(),
+                extra_files: Vec::new(),
                 classpath: Vec::new(),
                 javac_options: Vec::new(),
                 runtime_options: Vec::new(),
+                java_agents: Vec::new(),
+                java_version: None,
                 main_class: None,
                 cache_dir: None,
             })?
