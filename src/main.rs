@@ -138,6 +138,50 @@ struct CacheClearCommand {
 
 #[derive(Parser, Debug)]
 struct InfoCommand {
+    #[command(subcommand)]
+    command: InfoSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum InfoSubcommand {
+    /// Print classpath used by the script.
+    Classpath(InfoClasspathCommand),
+    /// Print parsed JBang directives.
+    Directives(InfoDirectivesCommand),
+}
+
+#[derive(Parser, Debug)]
+struct InfoClasspathCommand {
+    /// Only include dependency/classpath entries, not compiled script classes.
+    #[arg(long = "deps-only")]
+    deps_only: bool,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(long = "javac-option")]
+    javac_options: Vec<String>,
+
+    /// Override //MAIN / inferred class name.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source file.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct InfoDirectivesCommand {
     /// Java source file.
     script: PathBuf,
 }
@@ -190,11 +234,29 @@ fn main() -> Result<()> {
                 0
             }
         },
-        Some(Commands::Info(cmd)) => {
-            let source = std::fs::read_to_string(&cmd.script)?;
-            println!("{:#?}", doj::parse_directives(&source));
-            0
-        }
+        Some(Commands::Info(cmd)) => match cmd.command {
+            InfoSubcommand::Classpath(cmd) => {
+                let output = build_java(BuildOptions {
+                    script: cmd.script,
+                    extra_deps: cmd.deps,
+                    classpath: cmd.classpath,
+                    javac_options: cmd.javac_options,
+                    main_class: cmd.main_class,
+                    cache_dir: cmd.cache_dir,
+                })?;
+                let mut entries = output.classpath;
+                if !cmd.deps_only {
+                    entries.insert(0, output.classes_dir);
+                }
+                println!("{}", std::env::join_paths(entries)?.to_string_lossy());
+                0
+            }
+            InfoSubcommand::Directives(cmd) => {
+                let source = std::fs::read_to_string(&cmd.script)?;
+                println!("{:#?}", doj::parse_directives(&source));
+                0
+            }
+        },
         None => {
             let Some(script) = cli.script else {
                 eprintln!("No script specified. Try: doj run Hello.java");
