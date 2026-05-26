@@ -10,6 +10,7 @@ fn parses_core_jbang_directives() {
 //JAVAC_OPTIONS --enable-preview "-Xlint:all"
 //RUNTIME_OPTIONS --enable-preview '-Ddemo=true'
 //MAIN com.acme.Main
+//PREVIEW
 class Main {}
 "#;
 
@@ -28,6 +29,7 @@ class Main {}
         vec!["central=https://repo1.maven.org/maven2"]
     );
     assert_eq!(directives.sources, vec!["helper.java"]);
+    assert!(directives.enable_preview);
     assert_eq!(
         directives.javac_options,
         vec!["--enable-preview", "-Xlint:all"]

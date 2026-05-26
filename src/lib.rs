@@ -16,6 +16,7 @@ pub struct Directives {
     pub java_version: Option<String>,
     pub main_class: Option<String>,
     pub description: Option<String>,
+    pub enable_preview: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,7 @@ pub fn parse_directives(source: &str) -> Directives {
                     None => value.to_string(),
                 });
             }
+            "PREVIEW" => directives.enable_preview = true,
             _ => {}
         }
     }
@@ -148,6 +150,18 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         javac_cmd.arg("-classpath").arg(join_classpath(&cp_entries));
     }
     javac_cmd.args(&directives.javac_options);
+    if directives.enable_preview {
+        if !directives
+            .javac_options
+            .iter()
+            .any(|o| o == "--enable-preview")
+        {
+            javac_cmd.arg("--enable-preview");
+        }
+        if !has_source_or_release_option(&directives.javac_options) {
+            javac_cmd.arg("--release").arg(javac_major_version(&javac)?);
+        }
+    }
     javac_cmd.args(&sources);
     let status = javac_cmd
         .status()
@@ -156,9 +170,11 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         return Ok(status.code().unwrap_or(1));
     }
 
+    copy_declared_files(base_dir, &classes_dir, &directives.files)?;
+
     let main_class = directives
         .main_class
-        .or_else(|| infer_main_class(&script))
+        .or_else(|| infer_main_class(&script, &source))
         .ok_or_else(|| {
             anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
         })?;
@@ -168,6 +184,14 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     runtime_cp.extend(cp_entries);
     let mut java_cmd = Command::new(&java);
     java_cmd.args(&directives.runtime_options);
+    if directives.enable_preview
+        && !directives
+            .runtime_options
+            .iter()
+            .any(|o| o == "--enable-preview")
+    {
+        java_cmd.arg("--enable-preview");
+    }
     java_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
     java_cmd.arg(main_class);
     java_cmd.args(options.script_args);
@@ -236,6 +260,35 @@ fn java_for(java_version: &Option<String>) -> String {
     versioned_tool("java", java_version)
 }
 
+fn has_source_or_release_option(options: &[String]) -> bool {
+    options.iter().any(|option| {
+        matches!(
+            option.as_str(),
+            "--release" | "-release" | "--source" | "-source" | "-sourcepath" | "--source-path"
+        ) || option.starts_with("--release=")
+            || option.starts_with("--source=")
+            || option.starts_with("-source")
+    })
+}
+
+fn javac_major_version(javac: &str) -> Result<String> {
+    let output = Command::new(javac)
+        .arg("-version")
+        .output()
+        .with_context(|| format!("failed to execute {javac} -version"))?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let version_re = Regex::new(r"javac\s+(?:1\.)?(\d+)").expect("valid javac version regex");
+    version_re
+        .captures(&text)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
+        .ok_or_else(|| anyhow!("could not determine javac version from: {text}"))
+}
+
 fn versioned_tool(tool: &str, java_version: &Option<String>) -> String {
     if let Some(version) = java_version {
         let sdkman = PathBuf::from(format!(
@@ -259,11 +312,88 @@ fn versioned_tool(tool: &str, java_version: &Option<String>) -> String {
     tool.to_string()
 }
 
-fn infer_main_class(script: &Path) -> Option<String> {
-    script
+fn copy_declared_files(base_dir: &Path, classes_dir: &Path, files: &[String]) -> Result<()> {
+    for file_ref in files {
+        let (target, source) = split_file_ref(file_ref);
+        if source.is_absolute() || target.as_ref().is_some_and(|p| p.is_absolute()) {
+            return Err(anyhow!(
+                "only relative paths are allowed in //FILES: {file_ref}"
+            ));
+        }
+
+        let source = base_dir.join(source);
+        if source.is_dir() {
+            copy_resource_dir(&source, classes_dir, target.as_deref())?;
+        } else {
+            let target = target.unwrap_or_else(|| {
+                source
+                    .file_name()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from(file_ref))
+            });
+            copy_resource_file(&source, &classes_dir.join(target))?;
+        }
+    }
+    Ok(())
+}
+
+fn split_file_ref(file_ref: &str) -> (Option<PathBuf>, PathBuf) {
+    match file_ref.split_once('=') {
+        Some((target, source)) => (Some(PathBuf::from(target)), PathBuf::from(source)),
+        None => (None, PathBuf::from(file_ref)),
+    }
+}
+
+fn copy_resource_dir(source_dir: &Path, classes_dir: &Path, target: Option<&Path>) -> Result<()> {
+    for entry in walkdir::WalkDir::new(source_dir) {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(source_dir)?;
+        let dest = match target {
+            Some(target) => classes_dir.join(target).join(rel),
+            None => classes_dir.join(rel),
+        };
+        copy_resource_file(entry.path(), &dest)?;
+    }
+    Ok(())
+}
+
+fn copy_resource_file(source: &Path, dest: &Path) -> Result<()> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| anyhow!("invalid resource destination: {}", dest.display()))?;
+    fs::create_dir_all(parent)?;
+    fs::copy(source, dest).with_context(|| {
+        format!(
+            "failed to copy //FILES resource {} to {}",
+            source.display(),
+            dest.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn infer_main_class(script: &Path, source: &str) -> Option<String> {
+    let simple_name = script
         .file_stem()
         .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
+        .map(|s| s.to_string())?;
+    match package_name(source) {
+        Some(package) => Some(format!("{package}.{simple_name}")),
+        None => Some(simple_name),
+    }
+}
+
+fn package_name(source: &str) -> Option<String> {
+    let package_re =
+        Regex::new(r"(?m)^\s*package\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*;")
+            .expect("valid package regex");
+    package_re
+        .captures(source)
+        .and_then(|caps| caps.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 fn join_classpath(paths: &[PathBuf]) -> String {

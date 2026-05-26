@@ -16,11 +16,15 @@ Implemented now:
   - `//REPOS`
   - `//SOURCES`
   - `//FILES`
+  - `//PREVIEW`
   - `//JAVAC_OPTIONS` / `//COMPILE_OPTIONS`
   - `//RUNTIME_OPTIONS` / `//JAVA_OPTIONS`
   - `//MAIN`
   - `//DESCRIPTION`
 - compile/run cache under the OS cache directory
+- Java package-aware main-class inference
+- `//FILES` resources copied onto the runtime classpath
+- `//PREVIEW` compile/runtime flag handling
 - dependency resolution through Coursier when `//DEPS` is used
 
 Not yet implemented: catalogs, app install, templates, trust, export, edit integration, native image, full remote script handling, and the rest of JBang's lovely edge-case museum.
