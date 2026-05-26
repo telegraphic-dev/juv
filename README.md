@@ -24,6 +24,7 @@ Implemented now:
 - compile/run cache under the OS cache directory
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
+- non-coordinate `//DEPS` treated as source dependencies
 - `//PREVIEW` compile/runtime flag handling
 - dependency resolution through Coursier when `//DEPS` is used
 

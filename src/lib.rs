@@ -134,12 +134,17 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
     fs::create_dir_all(&classes_dir)?;
 
     let base_dir = script.parent().unwrap_or_else(|| Path::new("."));
+    let (binary_deps, source_deps): (Vec<_>, Vec<_>) = directives
+        .deps
+        .iter()
+        .cloned()
+        .partition(|dep| looks_like_binary_dependency(dep));
     let mut sources = vec![script.clone()];
-    for extra in directives.sources.iter() {
+    for extra in directives.sources.iter().chain(source_deps.iter()) {
         sources.push(base_dir.join(extra));
     }
 
-    let dep_cp = resolve_dependencies(&directives.deps, &directives.repos, &work_dir)?;
+    let dep_cp = resolve_dependencies(&binary_deps, &directives.repos, &work_dir)?;
     let mut cp_entries = options.classpath;
     cp_entries.extend(dep_cp);
 
@@ -213,6 +218,10 @@ fn cache_project_dir(cache_dir: Option<&Path>, script: &Path, source: &str) -> R
     hasher.update(source.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
     Ok(root.join(&hash[..16]))
+}
+
+fn looks_like_binary_dependency(dep: &str) -> bool {
+    dep.matches(':').count() >= 2 && !dep.ends_with(".java")
 }
 
 fn resolve_dependencies(

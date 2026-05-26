@@ -113,6 +113,44 @@ class Main {
 }
 
 #[test]
+fn treats_non_coordinate_deps_as_source_dependencies() {
+    let tmp = tempfile::tempdir().unwrap();
+    let main = tmp.path().join("Main.java");
+    let helper = tmp.path().join("DepHelper.java");
+    fs::write(
+        &helper,
+        r#"
+class DepHelper {
+  static String message() { return "source-dep-ok"; }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &main,
+        r#"
+//DEPS DepHelper.java
+class Main {
+  public static void main(String[] args) {
+    System.out.print(DepHelper.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_doj(&[std::path::Path::new("run"), &main], &[]);
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "source-dep-ok");
+}
+
+#[test]
 fn makes_files_directive_available_as_classpath_resource_with_target_alias() {
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("ReadResource.java");
