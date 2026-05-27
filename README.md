@@ -56,6 +56,7 @@ Implemented now:
 - `juv trust list`, `remove`, and `clear` manage trusted remote script entries
 - remote `http://` and `https://` scripts are downloaded into cache and require matching trust before build/run unless `--trust` is passed
 - remote relative `//SOURCES`, source-like `//DEPS`, and `//FILES` resources are downloaded next to the cached remote script
+- remote trust hashes cover those downloaded resources; legacy trust entries still work for scripts that do not declare relative resources
 - `juv info classpath` prints the script runtime classpath, with `--deps-only`
 - `juv info tools` prints JSON metadata for tooling and supports selecting a single field
 - `juv info docs` prints description and documentation references

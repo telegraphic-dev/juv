@@ -389,7 +389,13 @@ fn materialize_script(
         let hash = trusted_remote_hash(&source, &resources);
         if trust_remote {
             write_trust_entry(&script_text, &hash, cache_dir)?;
-        } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
+        } else if !is_trusted_remote_with_legacy_fallback(
+            &script_text,
+            &hash,
+            &source,
+            resources.is_empty(),
+            cache_dir,
+        )? {
             return Err(anyhow!(
                 "remote script {} is not trusted; run `juv trust add {}` or pass `juv run --trust {}`",
                 script_text,
@@ -525,7 +531,7 @@ fn validate_remote_relative_ref(resource_ref: &str) -> Result<()> {
     }
     if resource_ref
         .split('/')
-        .any(|part| part == ".." || part.is_empty())
+        .any(|part| part == ".." || part == "." || part.is_empty())
     {
         return Err(anyhow!(
             "remote resource paths must not contain empty or parent segments: {resource_ref}"
@@ -549,11 +555,13 @@ fn trusted_remote_hash(source: &str, resources: &[RemoteRelativeResource]) -> St
     format!("{:x}", hasher.finalize())
 }
 
-fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<String> {
-    if is_remote_url(resource_ref) {
-        return Ok(resource_ref.to_string());
-    }
+fn legacy_remote_hash(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
 
+fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<String> {
     let no_query = remote_url
         .split(['?', '#'])
         .next()
@@ -579,10 +587,24 @@ fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<S
     Ok(format!("{base_dir}{resource_ref}"))
 }
 
-fn is_trusted_remote(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<bool> {
-    Ok(trust_entries(cache_dir)?
+fn is_trusted_remote_with_legacy_fallback(
+    url: &str,
+    hash: &str,
+    source: &str,
+    allow_legacy_hash: bool,
+    cache_dir: Option<&Path>,
+) -> Result<bool> {
+    let entries = trust_entries(cache_dir)?;
+    if entries
         .iter()
-        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash))
+        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash)
+    {
+        return Ok(true);
+    }
+    Ok(allow_legacy_hash
+        && entries.iter().any(|(entry_url, entry_hash)| {
+            entry_url == url && entry_hash == &legacy_remote_hash(source)
+        }))
 }
 
 fn write_trust_entry(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<()> {

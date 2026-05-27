@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
@@ -5,6 +6,12 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+fn legacy_sha256(source: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
 
 fn juv_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_juv"))
@@ -145,6 +152,63 @@ fn remote_scripts_require_trust_before_execution() {
     assert_failure(&out);
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("not trusted"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn legacy_trust_hash_still_allows_remote_scripts_without_relative_resources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let source = "class RemoteHello { public static void main(String[] args) { System.out.print(\"legacy\"); } }\n";
+    let url = serve_n(source, 1);
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(
+        cache.join("trust.tsv"),
+        format!("{}\t{}\n", url, legacy_sha256(source)),
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "legacy");
+}
+
+#[test]
+fn remote_relative_resources_reject_dot_segments() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let base = serve_files(
+        HashMap::from([(
+            "/dot/Main.java",
+            r#"//SOURCES helpers/./Helper.java
+class Main { public static void main(String[] args) {} }
+"#,
+        )]),
+        1,
+    );
+    let url = format!("{base}/dot/Main.java");
+
+    let out = juv_command()
+        .arg("run")
+        .arg("--trust")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&url)
+        .output()
+        .unwrap();
+
+    assert_failure(&out);
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("must not contain empty or parent segments"),
         "stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
