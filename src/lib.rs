@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -1190,7 +1191,7 @@ pub fn export_jar(options: ExportOptions) -> Result<PathBuf> {
             &build.classes_dir,
             &output_path,
             &main_class,
-            &manifest_classpath(&build.classpath),
+            &manifest_classpath(&build.classpath)?,
         )?,
         ExportKind::Portable => {
             let manifest_cp =
@@ -1217,12 +1218,48 @@ fn export_output_path(script: &Path, output: Option<PathBuf>) -> Result<PathBuf>
     Ok(path)
 }
 
-fn manifest_classpath(paths: &[PathBuf]) -> String {
+fn manifest_classpath(paths: &[PathBuf]) -> Result<String> {
     paths
         .iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>()
-        .join(" ")
+        .map(|path| manifest_file_url(path))
+        .collect::<Result<Vec<_>>>()
+        .map(|entries| entries.join(" "))
+}
+
+fn manifest_file_url(path: &Path) -> Result<String> {
+    let absolute = fs::canonicalize(path)
+        .with_context(|| format!("failed to resolve classpath entry {}", path.display()))?;
+    let mut text = absolute.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) && text.len() >= 2 && text.as_bytes()[1] == b':' {
+        text.insert(0, '/');
+    }
+    Ok(format!("file://{}", percent_encode_manifest_path(&text)))
+}
+
+fn percent_encode_manifest_path(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn percent_encode_manifest_segment(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn copy_portable_classpath(
@@ -1238,6 +1275,7 @@ fn copy_portable_classpath(
         .unwrap_or_else(|| Path::new("."))
         .join("lib");
     fs::create_dir_all(&lib_dir)?;
+    let mut seen_names = HashSet::new();
     let mut manifest_entries = Vec::new();
     for entry in classpath {
         if !entry.is_file() {
@@ -1249,6 +1287,13 @@ fn copy_portable_classpath(
         let file_name = entry
             .file_name()
             .ok_or_else(|| anyhow!("invalid classpath entry: {}", entry.display()))?;
+        let manifest_name = percent_encode_manifest_segment(&file_name.to_string_lossy());
+        if !seen_names.insert(manifest_name.clone()) {
+            return Err(anyhow!(
+                "portable export has duplicate dependency filename {}; use unique filenames before exporting",
+                file_name.to_string_lossy()
+            ));
+        }
         let target = lib_dir.join(file_name);
         if target.exists() && !force {
             return Err(anyhow!(
@@ -1263,7 +1308,7 @@ fn copy_portable_classpath(
                 target.display()
             )
         })?;
-        manifest_entries.push(format!("lib/{}", file_name.to_string_lossy()));
+        manifest_entries.push(format!("lib/{manifest_name}"));
     }
     Ok(manifest_entries.join(" "))
 }
@@ -1300,13 +1345,42 @@ fn write_classes_jar(
 }
 
 fn render_manifest(main_class: &str, classpath: &str) -> String {
-    let mut manifest = String::from("Manifest-Version: 1.0\n");
-    manifest.push_str(&format!("Main-Class: {main_class}\n"));
+    let mut manifest = String::new();
+    manifest.push_str(&fold_manifest_line("Manifest-Version: 1.0"));
+    manifest.push_str(&fold_manifest_line(&format!("Main-Class: {main_class}")));
     if !classpath.is_empty() {
-        manifest.push_str(&format!("Class-Path: {classpath}\n"));
+        manifest.push_str(&fold_manifest_line(&format!("Class-Path: {classpath}")));
     }
     manifest.push('\n');
     manifest
+}
+
+fn fold_manifest_line(line: &str) -> String {
+    const MAX_BYTES: usize = 72;
+    let mut out = String::new();
+    let mut current = String::new();
+    let mut first = true;
+    for ch in line.chars() {
+        let limit = if first { MAX_BYTES } else { MAX_BYTES - 1 };
+        if !current.is_empty() && current.len() + ch.len_utf8() > limit {
+            if !first {
+                out.push(' ');
+            }
+            out.push_str(&current);
+            out.push('\n');
+            current.clear();
+            first = false;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        if !first {
+            out.push(' ');
+        }
+        out.push_str(&current);
+        out.push('\n');
+    }
+    out
 }
 
 // ── App install / uninstall / list ──────────────────────────────────────
