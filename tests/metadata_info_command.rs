@@ -1,8 +1,8 @@
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -27,7 +27,7 @@ fn fixture_script() -> (tempfile::TempDir, std::path::PathBuf) {
         r#"
 //DESCRIPTION First line
 //DESCRIPTION Second line
-//GAV dev.telegraphic:doj-demo:1.2.3
+//GAV dev.telegraphic:juv-demo:1.2.3
 //MODULE dev.telegraphic.demo
 //DOCS README.md
 //DOCS api=https://example.com/api
@@ -56,7 +56,7 @@ class MetaMain {
 fn directives_parse_broad_jbang_metadata() {
     let (_tmp, src) = fixture_script();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("directives")
         .arg(&src)
@@ -66,7 +66,7 @@ fn directives_parse_broad_jbang_metadata() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("gav: Some(\n        \"dev.telegraphic:doj-demo:1.2.3\""),
+        stdout.contains("gav: Some(\n        \"dev.telegraphic:juv-demo:1.2.3\""),
         "{stdout}"
     );
     assert!(
@@ -90,7 +90,7 @@ fn info_tools_prints_json_and_selects_fields() {
     let (_tmp, src) = fixture_script();
     let cache = tempfile::tempdir().unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("tools")
         .arg("--cache-dir")
@@ -103,7 +103,7 @@ fn info_tools_prints_json_and_selects_fields() {
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["originalResource"], src.to_string_lossy().as_ref());
     assert_eq!(json["mainClass"], "MetaMain");
-    assert_eq!(json["gav"], "dev.telegraphic:doj-demo:1.2.3");
+    assert_eq!(json["gav"], "dev.telegraphic:juv-demo:1.2.3");
     assert_eq!(json["module"], "dev.telegraphic.demo");
     assert_eq!(json["description"], "First line\nSecond line");
     assert_eq!(json["javaVersion"], "21");
@@ -126,7 +126,7 @@ fn info_tools_prints_json_and_selects_fields() {
         "https://example.com/api"
     );
 
-    let selected = doj_command()
+    let selected = juv_command()
         .arg("info")
         .arg("tools")
         .arg("--select")
@@ -144,7 +144,7 @@ fn info_tools_prints_json_and_selects_fields() {
 fn info_docs_prints_description_and_doc_targets() {
     let (_tmp, src) = fixture_script();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("docs")
         .arg(&src)
@@ -164,7 +164,7 @@ fn info_docs_prints_description_and_doc_targets() {
 fn info_cache_prints_effective_cache_dir() {
     let cache = tempfile::tempdir().unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("cache")
         .arg("--cache-dir")

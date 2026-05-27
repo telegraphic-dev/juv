@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -39,7 +39,7 @@ class InfoMain {
     )
     .unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("classpath")
         .arg("--cache-dir")
@@ -81,7 +81,7 @@ class InfoDepsOnly {
     )
     .unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("classpath")
         .arg("--deps-only")

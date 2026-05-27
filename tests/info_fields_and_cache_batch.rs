@@ -1,8 +1,8 @@
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -61,7 +61,7 @@ fn info_field_commands_print_single_metadata_fields() {
         ("gav", "dev.telegraphic:batch:1.0"),
         ("module", "dev.telegraphic.batch"),
     ] {
-        let out = doj_command()
+        let out = juv_command()
             .arg("info")
             .arg(field)
             .arg(&src)
@@ -87,7 +87,7 @@ fn info_collection_commands_print_directive_collections_one_per_line() {
         ("sources", "Extra.java"),
         ("files", "config/app.properties=app.properties"),
     ] {
-        let out = doj_command()
+        let out = juv_command()
             .arg("info")
             .arg(field)
             .arg(&src)
@@ -112,7 +112,7 @@ fn missing_optional_single_info_field_fails_with_clear_error() {
     )
     .unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("info")
         .arg("gav")
         .arg(&src)
@@ -132,7 +132,7 @@ fn cache_path_prints_default_or_overridden_cache_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache-root");
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("cache")
         .arg("path")
         .arg("--cache-dir")
@@ -158,7 +158,7 @@ fn cache_list_lists_cached_script_entries_after_build() {
     )
     .unwrap();
 
-    let build = doj_command()
+    let build = juv_command()
         .arg("build")
         .arg("--cache-dir")
         .arg(&cache)
@@ -167,7 +167,7 @@ fn cache_list_lists_cached_script_entries_after_build() {
         .unwrap();
     assert_success(&build);
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("cache")
         .arg("list")
         .arg("--cache-dir")
@@ -186,7 +186,7 @@ fn cache_list_is_empty_when_cache_dir_is_missing() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("missing-cache");
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("cache")
         .arg("list")
         .arg("--cache-dir")

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::{fs, path::PathBuf};
 
-use doj::{
+use juv::{
     app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, clear_cache,
     default_cache_dir, init_script, run_java, split_directive_words, trust_add, trust_clear,
     trust_entries, trust_remove, AppInstallOptions, BuildOptions, InitOptions, KeyValue,
@@ -10,7 +10,7 @@ use doj::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "doj", version, about = "do Java: a Rust port of JBang")]
+#[command(name = "juv", version, about = "juv: a Rust port of JBang")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -197,9 +197,9 @@ struct CacheCommand {
 
 #[derive(Subcommand, Debug)]
 enum CacheSubcommand {
-    /// Clear the doj cache directory.
+    /// Clear the juv cache directory.
     Clear(CacheClearCommand),
-    /// Print the effective doj cache directory.
+    /// Print the effective juv cache directory.
     Path(CachePathCommand),
     /// List cached script entries.
     List(CacheListCommand),
@@ -318,7 +318,7 @@ enum InfoSubcommand {
     Tools(InfoToolsCommand),
     /// Print documentation references declared by the script.
     Docs(InfoDocsCommand),
-    /// Print the effective doj cache directory.
+    /// Print the effective juv cache directory.
     Cache(InfoCacheCommand),
     /// Print effective main class.
     Main(InfoScriptCommand),
@@ -506,7 +506,7 @@ fn repo_json(repo: &str) -> serde_json::Value {
     }
 }
 
-fn key_values_json(values: &[doj::KeyValue]) -> serde_json::Value {
+fn key_values_json(values: &[juv::KeyValue]) -> serde_json::Value {
     serde_json::Value::Array(
         values
             .iter()
@@ -515,7 +515,7 @@ fn key_values_json(values: &[doj::KeyValue]) -> serde_json::Value {
     )
 }
 
-fn docs_json(values: &[doj::KeyValue]) -> serde_json::Value {
+fn docs_json(values: &[juv::KeyValue]) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for kv in values {
         let (id, target) = match &kv.value {
@@ -569,9 +569,9 @@ fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
     Ok(())
 }
 
-fn parsed_directives(script: &PathBuf) -> Result<doj::Directives> {
+fn parsed_directives(script: &PathBuf) -> Result<juv::Directives> {
     let source = fs::read_to_string(script)?;
-    Ok(doj::parse_directives(&source))
+    Ok(juv::parse_directives(&source))
 }
 
 fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
@@ -583,7 +583,7 @@ fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn tools_payload(script: &std::path::Path, output: &doj::BuildOutput) -> serde_json::Value {
+fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_json::Value {
     let directives = &output.directives;
     serde_json::json!({
         "originalResource": script.to_string_lossy(),
@@ -786,7 +786,7 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Docs(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
-                let directives = doj::parse_directives(&source);
+                let directives = juv::parse_directives(&source);
                 if let Some(description) = directives.description {
                     println!("{description}");
                 }
@@ -806,9 +806,9 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Main(cmd) => {
                 let source = fs::read_to_string(&cmd.script)?;
-                let main = doj::parse_directives(&source)
+                let main = juv::parse_directives(&source)
                     .main_class
-                    .or_else(|| doj::infer_main_class_from_source(&cmd.script, &source));
+                    .or_else(|| juv::infer_main_class_from_source(&cmd.script, &source));
                 print_required(main.as_deref(), "could not infer main class; add //MAIN")?;
                 0
             }
@@ -885,7 +885,7 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Directives(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
-                println!("{:#?}", doj::parse_directives(&source));
+                println!("{:#?}", juv::parse_directives(&source));
                 0
             }
         },
@@ -927,7 +927,7 @@ fn main() -> Result<()> {
         },
         None => {
             let Some(script) = cli.script else {
-                eprintln!("No script specified. Try: doj run Hello.java");
+                eprintln!("No script specified. Try: juv run Hello.java");
                 std::process::exit(2);
             };
             run_java(RunOptions {

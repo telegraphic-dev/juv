@@ -148,7 +148,7 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
 pub fn default_cache_dir() -> Result<PathBuf> {
     Ok(dirs::cache_dir()
         .ok_or_else(|| anyhow!("could not determine cache directory"))?
-        .join("doj"))
+        .join("juv"))
 }
 
 pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
@@ -384,7 +384,7 @@ fn materialize_script(
             write_trust_entry(&script_text, &hash, cache_dir)?;
         } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
             return Err(anyhow!(
-                "remote script {} is not trusted; run `doj trust add {}` or pass `doj run --trust {}`",
+                "remote script {} is not trusted; run `juv trust add {}` or pass `juv run --trust {}`",
                 script_text,
                 script_text,
                 script_text
@@ -870,7 +870,7 @@ pub fn app_bin_dir() -> Result<PathBuf> {
     Ok(dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .ok_or_else(|| anyhow!("could not determine local data directory"))?
-        .join("doj")
+        .join("juv")
         .join("bin"))
 }
 
@@ -907,12 +907,12 @@ pub fn app_install(options: AppInstallOptions) -> Result<PathBuf> {
         ));
     }
 
-    let doj_path = find_doj_binary()?;
+    let juv_path = find_juv_binary()?;
 
     // Build the wrapper script content
     let content = format!(
         "#!/bin/sh\nexec {} run -- {} \"$@\"\n",
-        shell_quote_path(&doj_path),
+        shell_quote_path(&juv_path),
         shell_quote_path(&script)
     );
     fs::write(&wrapper, content)?;
@@ -980,8 +980,8 @@ fn validate_app_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(anyhow!("command name cannot be empty"));
     }
-    if name == "doj" {
-        return Err(anyhow!("'doj' is a reserved command name"));
+    if name == "juv" {
+        return Err(anyhow!("'juv' is a reserved command name"));
     }
     // Must be a portable filename
     let valid =
@@ -992,14 +992,14 @@ fn validate_app_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn find_doj_binary() -> Result<PathBuf> {
+fn find_juv_binary() -> Result<PathBuf> {
     // Prefer the currently-running binary if possible
     if let Ok(exe) = std::env::current_exe() {
         if exe.exists() {
             return Ok(exe);
         }
     }
-    which::which("doj").context("could not locate doj binary on PATH")
+    which::which("juv").context("could not locate juv binary on PATH")
 }
 
 fn shell_quote_path(path: &Path) -> String {
@@ -1016,8 +1016,8 @@ fn shell_quote_path(path: &Path) -> String {
 
 fn parse_wrapper_target(wrapper: &Path) -> Option<String> {
     let content = fs::read_to_string(wrapper).ok()?;
-    // Wrapper line looks like: exec /path/to/doj run -- /path/to/script.java "$@"
-    // Or with quoting:          exec /path/to/doj run -- '/path/with spaces/script.java' "$@"
+    // Wrapper line looks like: exec /path/to/juv run -- /path/to/script.java "$@"
+    // Or with quoting:          exec /path/to/juv run -- '/path/with spaces/script.java' "$@"
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("exec ") {
             if let Some(idx) = rest.find(" run -- ") {

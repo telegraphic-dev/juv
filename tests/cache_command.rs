@@ -1,8 +1,8 @@
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -31,7 +31,7 @@ public class Hello {
     )
     .unwrap();
 
-    let build = doj_command()
+    let build = juv_command()
         .current_dir(tmp.path())
         .arg("build")
         .arg("--cache-dir")
@@ -46,7 +46,7 @@ public class Hello {
         "build should populate cache directory"
     );
 
-    let clear = doj_command()
+    let clear = juv_command()
         .current_dir(tmp.path())
         .arg("cache")
         .arg("clear")
@@ -64,7 +64,7 @@ fn cache_clear_is_idempotent_when_cache_is_missing() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("missing-cache");
 
-    let clear = doj_command()
+    let clear = juv_command()
         .current_dir(tmp.path())
         .arg("cache")
         .arg("clear")
