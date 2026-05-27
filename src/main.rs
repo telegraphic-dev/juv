@@ -39,6 +39,8 @@ enum Commands {
     Info(InfoCommand),
     /// Manage scripts installed as commands on PATH.
     App(AppCommand),
+    /// Resolve Maven dependencies without running.
+    Resolve(ResolveCommand),
 }
 
 #[derive(Parser, Debug)]
@@ -278,6 +280,25 @@ struct AppUninstallCommand {
 
 #[derive(Parser, Debug)]
 struct AppListCommand;
+
+#[derive(Parser, Debug)]
+struct ResolveCommand {
+    /// Maven coordinates to resolve (groupId:artifactId:version).
+    #[arg(required = true)]
+    coordinates: Vec<String>,
+
+    /// Additional repository (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Print classpath (JAR paths) instead of coordinates.
+    #[arg(long = "classpath", short = 'c')]
+    classpath: bool,
+}
 
 #[derive(Parser, Debug)]
 struct CacheClearCommand {
@@ -925,6 +946,36 @@ fn main() -> Result<()> {
                 0
             }
         },
+        Some(Commands::Resolve(cmd)) => {
+            let cache_dir = match cmd.cache_dir {
+                Some(path) => path,
+                None => default_cache_dir()?.join("deps"),
+            };
+            let mut repos = vec![juv::resolver::Repository::central()];
+            for repo in &cmd.repos {
+                if let Some((id, url)) = repo.split_once('=') {
+                    repos.push(juv::resolver::Repository {
+                        id: id.to_string(),
+                        url: url.to_string(),
+                    });
+                } else {
+                    repos.push(juv::resolver::Repository {
+                        id: repo.clone(),
+                        url: repo.clone(),
+                    });
+                }
+            }
+            if cmd.classpath {
+                let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
+                println!("{}", std::env::join_paths(paths)?.to_string_lossy());
+            } else {
+                let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
+                for artifact in &artifacts {
+                    println!("{artifact}");
+                }
+            }
+            0
+        }
         None => {
             let Some(script) = cli.script else {
                 eprintln!("No script specified. Try: juv run Hello.java");

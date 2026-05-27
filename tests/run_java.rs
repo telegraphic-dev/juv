@@ -245,10 +245,12 @@ class PreviewSwitch {
 
 #[test]
 #[cfg(unix)]
-fn resolves_deps_with_coursier_compatible_classpath_file() {
+fn resolves_deps_with_native_resolver() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::tempdir().unwrap();
+
+    // Build a tiny library JAR: com.example:greeter:1.0.0
     let lib_src_dir = tmp.path().join("libsrc/com/example");
     let lib_classes = tmp.path().join("libclasses");
     fs::create_dir_all(&lib_src_dir).unwrap();
@@ -276,7 +278,12 @@ public class Greeter {
         String::from_utf8_lossy(&javac.stdout),
         String::from_utf8_lossy(&javac.stderr)
     );
-    let jar_path = tmp.path().join("greeter.jar");
+
+    // Set up local Maven repo layout: com/example/greeter/1.0.0/
+    let repo_base = tmp.path().join("repo/com/example/greeter/1.0.0");
+    fs::create_dir_all(&repo_base).unwrap();
+
+    let jar_path = repo_base.join("greeter-1.0.0.jar");
     let jar = Command::new("jar")
         .arg("--create")
         .arg("--file")
@@ -293,52 +300,78 @@ public class Greeter {
         String::from_utf8_lossy(&jar.stderr)
     );
 
-    let fake_bin = tmp.path().join("bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    let fake_cs = fake_bin.join("cs");
+    // Write a POM for the artifact
+    let pom_path = repo_base.join("greeter-1.0.0.pom");
     fs::write(
-        &fake_cs,
+        &pom_path,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>greeter</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+</project>"#,
+    )
+    .unwrap();
+
+    // Start a tiny HTTP server to serve the local Maven repo
+    let port = 19876;
+    let server_script = tmp.path().join("serve.sh");
+    let repo_dir = tmp.path().join("repo");
+    fs::write(
+        &server_script,
         format!(
-            r#"#!/bin/sh
-if [ "$1" = "--help" ]; then exit 0; fi
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--classpath-file" ]; then
-    shift
-    printf '%s\n' '{}' > "$1"
-    exit 0
-  fi
-  shift
-done
-exit 2
-"#,
-            jar_path.display()
+            "#!/bin/sh\nexec python3 -m http.server {port} --bind 127.0.0.1 --directory '{}'",
+            repo_dir.display()
         ),
     )
     .unwrap();
-    fs::set_permissions(&fake_cs, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&server_script, fs::Permissions::from_mode(0o755)).unwrap();
+
+    #[allow(clippy::zombie_processes)]
+    let mut server = Command::new(&server_script)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+
+    // Wait for server to be ready
+    let mut ready = false;
+    for _ in 0..50 {
+        if ureq::get(&format!("http://127.0.0.1:{port}/"))
+            .call()
+            .is_ok()
+        {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(ready, "local Maven repo server did not start");
 
     let app = tmp.path().join("UseDep.java");
     fs::write(
         &app,
-        r#"
+        format!(
+            r#"
+//REPOS local=http://127.0.0.1:{port}
 //DEPS com.example:greeter:1.0.0
 import com.example.Greeter;
-class UseDep {
-  public static void main(String[] args) {
+class UseDep {{
+  public static void main(String[] args) {{
     System.out.print(Greeter.message());
-  }
-}
-"#,
+  }}
+}}
+"#
+        ),
     )
     .unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let out = juv_command()
-        .env("PATH", format!("{}:{old_path}", fake_bin.display()))
-        .arg("run")
-        .arg(&app)
-        .output()
-        .unwrap();
+    let out = juv_command().arg("run").arg(&app).output().unwrap();
+
+    // Clean up server
+    let _ = kill(server.id());
+    let _ = server.wait();
 
     assert!(
         out.status.success(),
@@ -347,4 +380,9 @@ class UseDep {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "deps-ok");
+}
+
+fn kill(pid: u32) -> std::io::Result<()> {
+    Command::new("kill").arg(pid.to_string()).output()?;
+    Ok(())
 }
