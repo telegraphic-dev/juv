@@ -735,10 +735,11 @@ class {base_name} implements Callable<Integer> {{
 fn render_agent_init_script(base_name: &str, options: &InitOptions) -> String {
     let mut out = String::new();
     render_header(options, None, &mut out);
+    out.push_str(&format!(
+        "//JAVAAGENT\n//MANIFEST Premain-Class={base_name}\n//MANIFEST Can-Redefine-Classes=true\n//MANIFEST Can-Retransform-Classes=true\n//MANIFEST Can-Set-Native-Method-Prefix=true\n"
+    ));
     render_dependency_hint(options, &mut out);
-    out.push_str(
-        "//JAVAAGENT Can-Redefine-Classes Can-Retransform-Classes Can-Set-Native-Method-Prefix\n\n",
-    );
+    out.push('\n');
     out.push_str(&format!(
         r#"import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;

@@ -134,7 +134,9 @@ fn init_agent_template_creates_java_agent_skeleton() {
 
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
-    assert!(content.contains("//JAVAAGENT Can-Redefine-Classes"));
+    assert!(content.contains("//JAVAAGENT\n"));
+    assert!(content.contains("//MANIFEST Premain-Class=Spy"));
+    assert!(content.contains("//MANIFEST Can-Redefine-Classes=true"));
     assert!(content.contains("public static void premain"));
     assert!(content.contains("public class Spy"));
 }
