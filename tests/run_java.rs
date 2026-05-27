@@ -245,10 +245,10 @@ class PreviewSwitch {
 
 #[test]
 #[cfg(unix)]
-fn resolves_deps_with_coursier_compatible_classpath_file() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn resolves_deps_with_native_resolver() {
     let tmp = tempfile::tempdir().unwrap();
+
+    // Build a tiny library JAR: com.example:greeter:1.0.0
     let lib_src_dir = tmp.path().join("libsrc/com/example");
     let lib_classes = tmp.path().join("libclasses");
     fs::create_dir_all(&lib_src_dir).unwrap();
@@ -276,7 +276,12 @@ public class Greeter {
         String::from_utf8_lossy(&javac.stdout),
         String::from_utf8_lossy(&javac.stderr)
     );
-    let jar_path = tmp.path().join("greeter.jar");
+
+    // Set up local Maven repo layout: com/example/greeter/1.0.0/
+    let repo_base = tmp.path().join("repo/com/example/greeter/1.0.0");
+    fs::create_dir_all(&repo_base).unwrap();
+
+    let jar_path = repo_base.join("greeter-1.0.0.jar");
     let jar = Command::new("jar")
         .arg("--create")
         .arg("--file")
@@ -293,52 +298,57 @@ public class Greeter {
         String::from_utf8_lossy(&jar.stderr)
     );
 
-    let fake_bin = tmp.path().join("bin");
-    fs::create_dir_all(&fake_bin).unwrap();
-    let fake_cs = fake_bin.join("cs");
+    // Write a POM for the artifact
+    let pom_path = repo_base.join("greeter-1.0.0.pom");
     fs::write(
-        &fake_cs,
-        format!(
-            r#"#!/bin/sh
-if [ "$1" = "--help" ]; then exit 0; fi
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--classpath-file" ]; then
-    shift
-    printf '%s\n' '{}' > "$1"
-    exit 0
-  fi
-  shift
-done
-exit 2
-"#,
-            jar_path.display()
-        ),
+        &pom_path,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>greeter</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+</project>"#,
     )
     .unwrap();
-    fs::set_permissions(&fake_cs, fs::Permissions::from_mode(0o755)).unwrap();
+
+    // In-process static file server — no TOCTOU port race, no python3 dependency
+    let repo_dir = tmp.path().join("repo");
+    let repo_dir_clone = repo_dir.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let _server_handle = std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let stream = match stream {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let repo = repo_dir_clone.clone();
+            std::thread::spawn(move || serve_file(stream, &repo));
+        }
+    });
 
     let app = tmp.path().join("UseDep.java");
     fs::write(
         &app,
-        r#"
+        format!(
+            r#"
+//REPOS local=http://127.0.0.1:{port}
 //DEPS com.example:greeter:1.0.0
 import com.example.Greeter;
-class UseDep {
-  public static void main(String[] args) {
+class UseDep {{
+  public static void main(String[] args) {{
     System.out.print(Greeter.message());
-  }
-}
-"#,
+  }}
+}}
+"#
+        ),
     )
     .unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let out = juv_command()
-        .env("PATH", format!("{}:{old_path}", fake_bin.display()))
-        .arg("run")
-        .arg(&app)
-        .output()
-        .unwrap();
+    let out = juv_command().arg("run").arg(&app).output().unwrap();
+
+    // Server thread will be cleaned up when the process exits
 
     assert!(
         out.status.success(),
@@ -347,4 +357,39 @@ class UseDep {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "deps-ok");
+}
+
+/// Minimal HTTP file server for integration tests.
+/// Serves GET requests with static files from `root_dir`.
+fn serve_file(mut stream: std::net::TcpStream, root_dir: &std::path::Path) {
+    use std::io::{BufRead, Read, Write};
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+    let mut request = String::new();
+    if reader.read_line(&mut request).is_err() {
+        return;
+    }
+    // Parse path from "GET /path HTTP/1.1"
+    let path = request
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("/")
+        .trim_start_matches('/');
+    let file_path = root_dir.join(path);
+
+    let (status, body) = if file_path.exists() && file_path.starts_with(root_dir) {
+        let mut buf = Vec::new();
+        let mut f = std::fs::File::open(&file_path).unwrap();
+        f.read_to_end(&mut buf).unwrap();
+        ("200 OK", buf)
+    } else {
+        ("404 Not Found", b"Not Found".to_vec())
+    };
+
+    let header = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(&body);
+    let _ = stream.flush();
 }

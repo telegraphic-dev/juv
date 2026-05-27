@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod resolver;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyValue {
     pub key: String,
@@ -660,38 +662,37 @@ fn looks_like_binary_dependency(dep: &str) -> bool {
 fn resolve_dependencies(
     deps: &[String],
     repos: &[String],
-    work_dir: &Path,
+    _work_dir: &Path,
 ) -> Result<Vec<PathBuf>> {
     if deps.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(coursier) = find_command(&["cs", "coursier"]) else {
-        return Err(anyhow!(
-            "//DEPS requires Coursier (`cs` or `coursier`) on PATH for now"
-        ));
-    };
-    let cp_file = work_dir.join("classpath.txt");
-    let mut cmd = Command::new(coursier);
-    cmd.arg("fetch").arg("--classpath-file").arg(&cp_file);
-    for repo in repos {
-        cmd.arg("--repository").arg(repo);
-    }
-    cmd.args(deps);
-    let status = cmd.status().context("failed to execute Coursier")?;
-    if !status.success() {
-        return Ok(Vec::new());
-    }
-    let cp = fs::read_to_string(cp_file)?;
-    Ok(split_classpath(&cp))
-}
 
-fn find_command(names: &[&str]) -> Option<String> {
-    for name in names {
-        if Command::new(name).arg("--help").output().is_ok() {
-            return Some((*name).to_string());
+    let cache_dir = default_cache_dir()?.join("deps");
+    let mut maven_repos = vec![resolver::Repository::central()];
+    for repo in repos {
+        if let Some((id, url)) = repo.split_once('=') {
+            maven_repos.push(resolver::Repository {
+                id: id.to_string(),
+                url: url.to_string(),
+            });
+        } else if repo.starts_with("http") {
+            maven_repos.push(resolver::Repository {
+                id: repo.clone(),
+                url: repo.clone(),
+            });
+        } else if repo == "mavenCentral" || repo == "central" {
+            // already included
+        } else {
+            maven_repos.push(resolver::Repository {
+                id: repo.clone(),
+                url: repo.clone(),
+            });
         }
     }
-    None
+
+    let paths = resolver::resolve_classpath(deps, &maven_repos, &cache_dir)?;
+    Ok(paths)
 }
 
 fn javac_for(java_version: &Option<String>) -> String {
@@ -853,15 +854,6 @@ fn join_classpath(paths: &[PathBuf]) -> String {
         .map(|p| p.to_string_lossy())
         .collect::<Vec<_>>()
         .join(sep)
-}
-
-fn split_classpath(text: &str) -> Vec<PathBuf> {
-    let sep = if cfg!(windows) { ';' } else { ':' };
-    text.trim()
-        .split(sep)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .collect()
 }
 
 // ── App install / uninstall / list ──────────────────────────────────────
