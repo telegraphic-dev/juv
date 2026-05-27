@@ -318,3 +318,45 @@ fn catalog_add_prefetches_description_using_catalog_file_relative_ref() {
         "{stdout}"
     );
 }
+
+#[test]
+fn self_imported_catalog_with_relative_dot_path_does_not_recurse_forever() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello");
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbang-catalog.json"),
+        r#"{
+  "aliases": {
+    "hello": { "script-ref": "Hello.java", "description": "Hello" }
+  },
+  "catalogs": {
+    "self": { "catalog-ref": "./jbang-catalog.json", "import": true }
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let list = juv_command()
+        .current_dir(tmp.path())
+        .arg("alias")
+        .arg("list")
+        .output()
+        .unwrap();
+    assert_success(&list);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert_eq!(
+        stdout.matches("hello\tHello.java\tHello").count(),
+        1,
+        "{stdout}"
+    );
+}

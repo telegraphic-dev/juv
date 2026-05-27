@@ -710,7 +710,7 @@ fn read_catalog_aliases_recursive(
     catalog_path: &Path,
     seen: &mut HashSet<PathBuf>,
 ) -> Result<Vec<CatalogAlias>> {
-    if !seen.insert(catalog_path.to_path_buf()) {
+    if !seen.insert(catalog_seen_key(catalog_path)) {
         return Ok(Vec::new());
     }
     let mut out = read_catalog_aliases(catalog_path)?;
@@ -835,7 +835,7 @@ fn read_catalog_templates_recursive(
     catalog_path: &Path,
     seen: &mut HashSet<PathBuf>,
 ) -> Result<Vec<CatalogTemplate>> {
-    if !seen.insert(catalog_path.to_path_buf()) {
+    if !seen.insert(catalog_seen_key(catalog_path)) {
         return Ok(Vec::new());
     }
     let mut out = read_catalog_templates(catalog_path)?;
@@ -846,6 +846,14 @@ fn read_catalog_templates_recursive(
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+fn catalog_seen_key(catalog_path: &Path) -> PathBuf {
+    let text = catalog_path.to_string_lossy();
+    if is_remote_url(&text) {
+        return catalog_path.to_path_buf();
+    }
+    fs::canonicalize(catalog_path).unwrap_or_else(|_| catalog_path.to_path_buf())
 }
 
 fn read_catalog_templates(catalog_path: &Path) -> Result<Vec<CatalogTemplate>> {
