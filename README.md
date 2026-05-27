@@ -11,7 +11,7 @@ Implemented now:
 - `juv run <script.java> [args...]`
 - `juv build <script.java>`
 - `juv init <script.java>` built-in Java template generation
-- `juv template list [--json]` list built-in init templates
+- `juv template list [--json]` list built-in and imported catalog init templates
 - `juv cache clear`
 - `juv cache path [--cache-dir ...]`
 - `juv cache list [--json] [--cache-dir ...]`
@@ -23,6 +23,8 @@ Implemented now:
 - `juv alias list [--json]` list aliases from the nearest `jbang-catalog.json`
 - `juv alias add <script.java|url> [args...]` add a local catalog alias
 - `juv alias remove <name>` remove a local catalog alias
+- `juv catalog add <name> <catalog-path-or-url> [--import]` register an external catalog
+- `juv catalog list [--json]` list external catalogs from the nearest `jbang-catalog.json`
 - `juv run <alias>` / `juv <alias>` run local catalog aliases
 - `juv export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `juv export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
@@ -55,8 +57,8 @@ Implemented now:
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `juv build` compiles scripts into cache without running them
-- `juv init` creates Java 25+ unnamed-class scripts from built-in templates (`hello`/`java`, `compact`, `cli`, `agent`), supports `--deps`, `--java`, `--template`, and `--force`
-- `juv template list` lists built-in init templates and supports `--json`
+- `juv init` creates Java 25+ unnamed-class scripts from built-in or imported catalog templates (`hello`/`java`, `compact`, `cli`, `agent`, plus catalog `templates` entries), supports `--deps`, `--java`, `--template`, and `--force`
+- `juv template list` lists built-in and imported catalog init templates and supports `--json`
 - `juv cache clear` clears the compiled-script cache
 - `juv cache path` prints the effective compiled-script cache directory
 - `juv cache list` lists cached script entries with their classes/cache directories and supports `--json`
@@ -73,7 +75,8 @@ Implemented now:
 - `juv info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
 - `juv info cache` prints the effective cache directory
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
-- local catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `alias add/remove`, `base-ref`, `script-ref`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
+- local and imported catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `alias add/remove`, `catalog add/list`, `base-ref`, `script-ref`, `catalog-ref`, `import`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
+- imported catalog templates with `file-refs` and default `properties`, usable via `juv init --template <name>`
 - `juv export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `juv export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - Java package-aware main-class inference
@@ -93,7 +96,7 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalog import/list/add/remove for nested catalogs, external catalog templates, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalog remove for nested catalogs, multi-file template expansion, template property CLI overrides, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 
