@@ -269,3 +269,59 @@ fn app_install_refuses_reserved_name() {
         "expected 'reserved' error: {stderr}"
     );
 }
+
+#[test]
+fn app_install_quotes_script_path_with_spaces() {
+    let home = TempDir::new().unwrap();
+    let script_dir = TempDir::new().unwrap();
+    // Create script in a directory with spaces
+    let spaced_dir = script_dir.path().join("my projects");
+    fs::create_dir_all(&spaced_dir).unwrap();
+    let script = create_test_script(&spaced_dir, "Hello.java");
+
+    let output = doj_with_home(&home.path().to_path_buf())
+        .args([
+            "app",
+            "install",
+            "--name",
+            "hello",
+            script.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "install with spaced path failed:\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Read the wrapper and verify the path is single-quoted
+    let installed_path = stdout
+        .lines()
+        .next()
+        .unwrap()
+        .trim()
+        .trim_start_matches("Command installed: ");
+    let wrapper = fs::read_to_string(installed_path).unwrap();
+    assert!(
+        wrapper.contains("'"),
+        "wrapper should single-quote paths with spaces: {wrapper}"
+    );
+    assert!(
+        wrapper.contains("run --"),
+        "wrapper should contain 'run --': {wrapper}"
+    );
+
+    // Verify app list can parse the quoted path back correctly
+    let output = doj_with_home(&home.path().to_path_buf())
+        .args(["app", "list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("my projects") || stdout.contains("Hello.java"),
+        "app list should show the script target: {stdout}"
+    );
+}

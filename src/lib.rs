@@ -910,11 +910,10 @@ pub fn app_install(options: AppInstallOptions) -> Result<PathBuf> {
     let doj_path = find_doj_binary()?;
 
     // Build the wrapper script content
-    let script_path = script.to_string_lossy();
     let content = format!(
         "#!/bin/sh\nexec {} run -- {} \"$@\"\n",
         shell_quote_path(&doj_path),
-        script_path
+        shell_quote_path(&script)
     );
     fs::write(&wrapper, content)?;
     #[cfg(unix)]
@@ -1018,12 +1017,19 @@ fn shell_quote_path(path: &Path) -> String {
 fn parse_wrapper_target(wrapper: &Path) -> Option<String> {
     let content = fs::read_to_string(wrapper).ok()?;
     // Wrapper line looks like: exec /path/to/doj run -- /path/to/script.java "$@"
+    // Or with quoting:          exec /path/to/doj run -- '/path/with spaces/script.java' "$@"
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("exec ") {
             if let Some(idx) = rest.find(" run -- ") {
                 let marker = " run -- ";
                 let after = &rest[idx + marker.len()..];
                 let target = after.strip_suffix(" \"$@\"").unwrap_or(after);
+                let target = target.trim();
+                // Strip single-quote wrapping added by shell_quote_path
+                let target = target
+                    .strip_prefix('\'')
+                    .and_then(|t| t.strip_suffix('\''))
+                    .unwrap_or(target);
                 return Some(target.trim().to_string());
             }
         }
