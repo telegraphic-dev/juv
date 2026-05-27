@@ -1,8 +1,8 @@
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -19,7 +19,7 @@ fn init_creates_default_java_script_from_filename() {
     let tmp = tempfile::tempdir().unwrap();
     let script = tmp.path().join("Hello.java");
 
-    let out = doj_command()
+    let out = juv_command()
         .current_dir(tmp.path())
         .arg("init")
         .arg("Hello.java")
@@ -39,7 +39,7 @@ fn init_writes_deps_and_java_directives() {
     let tmp = tempfile::tempdir().unwrap();
     let script = tmp.path().join("UseDeps.java");
 
-    let out = doj_command()
+    let out = juv_command()
         .current_dir(tmp.path())
         .arg("init")
         .arg("--java")
@@ -63,7 +63,7 @@ fn init_refuses_to_overwrite_without_force() {
     let script = tmp.path().join("Existing.java");
     fs::write(&script, "keep me").unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .current_dir(tmp.path())
         .arg("init")
         .arg("Existing.java")
@@ -80,7 +80,7 @@ fn init_force_overwrites_existing_file() {
     let script = tmp.path().join("Existing.java");
     fs::write(&script, "replace me").unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .current_dir(tmp.path())
         .arg("init")
         .arg("--force")

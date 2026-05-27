@@ -1,9 +1,9 @@
 [package]
-name = "doj"
+name = "juv"
 version = "0.1.0"
 edition = "2021"
-description = "do Java: a Rust port of JBang"
-repository = "https://github.com/telegraphic-dev/doj"
+description = "juv: a Rust port of JBang"
+repository = "https://github.com/telegraphic-dev/juv"
 license = "MIT"
 
 [dependencies]

@@ -2,20 +2,20 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-fn doj() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_doj"))
+fn juv() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_juv"))
 }
 
 // Use a custom bin dir to avoid polluting the user's actual PATH.
-fn doj_with_home(home: &PathBuf) -> std::process::Command {
-    let mut cmd = std::process::Command::new(doj());
+fn juv_with_home(home: &PathBuf) -> std::process::Command {
+    let mut cmd = std::process::Command::new(juv());
     cmd.env("XDG_DATA_HOME", home);
-    // Ensure the doj binary can find itself
+    // Ensure the juv binary can find itself
     cmd.env(
         "PATH",
         format!(
             "{}:{}",
-            doj().parent().unwrap().display(),
+            juv().parent().unwrap().display(),
             std::env::var("PATH").unwrap_or_default()
         ),
     );
@@ -38,7 +38,7 @@ fn app_install_creates_wrapper_script() {
     let script_dir = TempDir::new().unwrap();
     let script = create_test_script(script_dir.path(), "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "install", script.to_str().unwrap()])
         .output()
         .unwrap();
@@ -47,7 +47,7 @@ fn app_install_creates_wrapper_script() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "doj app install failed:\nstdout: {stdout}\nstderr: {stderr}"
+        "juv app install failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(
         stdout.contains("Command installed:"),
@@ -74,7 +74,7 @@ fn app_install_with_custom_name() {
     let script_dir = TempDir::new().unwrap();
     let script = create_test_script(script_dir.path(), "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args([
             "app",
             "install",
@@ -88,7 +88,7 @@ fn app_install_with_custom_name() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "doj app install --name failed:\nstdout: {stdout}\nstderr: {}",
+        "juv app install --name failed:\nstdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
@@ -120,14 +120,14 @@ fn app_install_refuses_without_force() {
     let script = create_test_script(script_dir.path(), "Hello.java");
 
     // First install succeeds
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "install", script.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(output.status.success());
 
     // Second install without --force fails
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "install", script.to_str().unwrap()])
         .output()
         .unwrap();
@@ -148,13 +148,13 @@ fn app_install_force_overwrites() {
     let script_dir = TempDir::new().unwrap();
     let script = create_test_script(script_dir.path(), "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "install", script.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(output.status.success());
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "install", "--force", script.to_str().unwrap()])
         .output()
         .unwrap();
@@ -171,7 +171,7 @@ fn app_uninstall_removes_command() {
     let script_dir = TempDir::new().unwrap();
     let script = create_test_script(script_dir.path(), "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args([
             "app",
             "install",
@@ -183,7 +183,7 @@ fn app_uninstall_removes_command() {
         .unwrap();
     assert!(output.status.success());
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "uninstall", "hello"])
         .output()
         .unwrap();
@@ -199,7 +199,7 @@ fn app_uninstall_removes_command() {
 fn app_uninstall_reports_missing() {
     let home = TempDir::new().unwrap();
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "uninstall", "nonexistent"])
         .output()
         .unwrap();
@@ -218,7 +218,7 @@ fn app_list_shows_installed_commands() {
     let script = create_test_script(script_dir.path(), "Hello.java");
 
     // Empty list
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "list"])
         .output()
         .unwrap();
@@ -229,7 +229,7 @@ fn app_list_shows_installed_commands() {
     );
 
     // Install and list
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args([
             "app",
             "install",
@@ -241,7 +241,7 @@ fn app_list_shows_installed_commands() {
         .unwrap();
     assert!(output.status.success());
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "list"])
         .output()
         .unwrap();
@@ -258,11 +258,11 @@ fn app_install_refuses_reserved_name() {
     let script_dir = TempDir::new().unwrap();
     let script = create_test_script(script_dir.path(), "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
-        .args(["app", "install", "--name", "doj", script.to_str().unwrap()])
+    let output = juv_with_home(&home.path().to_path_buf())
+        .args(["app", "install", "--name", "juv", script.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(!output.status.success(), "installing 'doj' should fail");
+    assert!(!output.status.success(), "installing 'juv' should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("reserved"),
@@ -279,7 +279,7 @@ fn app_install_quotes_script_path_with_spaces() {
     fs::create_dir_all(&spaced_dir).unwrap();
     let script = create_test_script(&spaced_dir, "Hello.java");
 
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args([
             "app",
             "install",
@@ -315,7 +315,7 @@ fn app_install_quotes_script_path_with_spaces() {
     );
 
     // Verify app list can parse the quoted path back correctly
-    let output = doj_with_home(&home.path().to_path_buf())
+    let output = juv_with_home(&home.path().to_path_buf())
         .args(["app", "list"])
         .output()
         .unwrap();

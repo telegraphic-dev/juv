@@ -4,8 +4,8 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::thread;
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -60,7 +60,7 @@ fn remote_scripts_require_trust_before_execution() {
 "#;
     let url = serve_once(src);
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("run")
         .arg("--cache-dir")
         .arg(&cache)
@@ -86,7 +86,7 @@ fn trust_add_allows_remote_script_execution_and_trust_list_shows_entry() {
 "#;
     let url = serve_once(src);
 
-    let trust = doj_command()
+    let trust = juv_command()
         .arg("trust")
         .arg("add")
         .arg("--cache-dir")
@@ -96,7 +96,7 @@ fn trust_add_allows_remote_script_execution_and_trust_list_shows_entry() {
         .unwrap();
     assert_success(&trust);
 
-    let listed = doj_command()
+    let listed = juv_command()
         .arg("trust")
         .arg("list")
         .arg("--cache-dir")
@@ -108,7 +108,7 @@ fn trust_add_allows_remote_script_execution_and_trust_list_shows_entry() {
 
     let run_url = serve_n(src, 2);
     let rewritten_cache = cache.join("run");
-    let trust_again = doj_command()
+    let trust_again = juv_command()
         .arg("trust")
         .arg("add")
         .arg("--cache-dir")
@@ -117,7 +117,7 @@ fn trust_add_allows_remote_script_execution_and_trust_list_shows_entry() {
         .output()
         .unwrap();
     assert_success(&trust_again);
-    let out = doj_command()
+    let out = juv_command()
         .arg("run")
         .arg("--cache-dir")
         .arg(&rewritten_cache)
@@ -143,7 +143,7 @@ fn run_trust_flag_trusts_and_runs_remote_script_in_one_step() {
 "#;
     let url = serve_once(src);
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("run")
         .arg("--trust")
         .arg("--cache-dir")
@@ -170,7 +170,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
     let url = serve_once(src);
 
     assert_success(
-        &doj_command()
+        &juv_command()
             .arg("trust")
             .arg("add")
             .arg("--cache-dir")
@@ -180,7 +180,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
             .unwrap(),
     );
     assert_success(
-        &doj_command()
+        &juv_command()
             .arg("trust")
             .arg("remove")
             .arg("--cache-dir")
@@ -189,7 +189,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
             .output()
             .unwrap(),
     );
-    let listed = doj_command()
+    let listed = juv_command()
         .arg("trust")
         .arg("list")
         .arg("--cache-dir")
@@ -201,7 +201,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
 
     let url2 = serve_once(src);
     assert_success(
-        &doj_command()
+        &juv_command()
             .arg("trust")
             .arg("add")
             .arg("--cache-dir")
@@ -211,7 +211,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
             .unwrap(),
     );
     assert_success(
-        &doj_command()
+        &juv_command()
             .arg("trust")
             .arg("clear")
             .arg("--cache-dir")
@@ -219,7 +219,7 @@ fn trust_remove_and_clear_manage_trusted_remote_entries() {
             .output()
             .unwrap(),
     );
-    let listed_after_clear = doj_command()
+    let listed_after_clear = juv_command()
         .arg("trust")
         .arg("list")
         .arg("--cache-dir")

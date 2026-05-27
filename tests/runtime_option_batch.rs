@@ -2,8 +2,8 @@ use serde_json::Value;
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
 fn assert_success(out: &Output) {
@@ -34,21 +34,21 @@ fn run_accepts_jbang_style_cli_overrides_for_java_sources_files_and_runtime_opti
         r#"class CliOptions {
   public static void main(String[] args) throws Exception {
     String message = new String(CliOptions.class.getResourceAsStream("/data/message.txt").readAllBytes());
-    System.out.println(Helper.text() + ":" + message + ":" + System.getProperty("doj.test"));
+    System.out.println(Helper.text() + ":" + message + ":" + System.getProperty("juv.test"));
   }
 }
 "#,
     )
     .unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("run")
         .arg("--source")
         .arg("Helper.java")
         .arg("--files")
         .arg("data/message.txt=message.txt")
         .arg("--java-option")
-        .arg("-Ddoj.test=ok")
+        .arg("-Djuv.test=ok")
         .arg(&src)
         .current_dir(tmp.path())
         .output()
@@ -73,7 +73,7 @@ fn build_accepts_java_repo_source_files_and_compile_option_overrides() {
     fs::write(&resource, "build resource").unwrap();
     fs::write(&src, "class BuildOptions { BuildHelper h; }\n").unwrap();
 
-    let out = doj_command()
+    let out = juv_command()
         .arg("build")
         .arg("--java")
         .arg("17")
@@ -93,7 +93,7 @@ fn build_accepts_java_repo_source_files_and_compile_option_overrides() {
         .unwrap();
 
     assert_success(&out);
-    let listed = doj_command()
+    let listed = juv_command()
         .arg("cache")
         .arg("list")
         .arg("--json")
@@ -135,7 +135,7 @@ class InfoOptions { public static void main(String[] args) {} }
         ("javaagents", "agent.jar=debug"),
         ("manifest", "Main-Class=InfoOptions"),
     ] {
-        let out = doj_command()
+        let out = juv_command()
             .arg("info")
             .arg(field)
             .arg(&src)
@@ -149,7 +149,7 @@ class InfoOptions { public static void main(String[] args) {} }
         );
     }
 
-    let tools = doj_command()
+    let tools = juv_command()
         .arg("info")
         .arg("tools")
         .arg("--java")

@@ -1,6 +1,6 @@
-# doj
+# juv
 
-`doj` means **do Java**: a Rust-native port of JBang, starting with the execution path.
+`juv` is a Rust-native port of JBang, starting with the execution path.
 
 This repository is intentionally aiming for JBang compatibility rather than inventing a new script format.
 
@@ -8,25 +8,25 @@ This repository is intentionally aiming for JBang compatibility rather than inve
 
 Implemented now:
 
-- `doj run <script.java> [args...]`
-- `doj build <script.java>`
-- `doj init <script.java>` default Java template generation
-- `doj cache clear`
-- `doj cache path [--cache-dir ...]`
-- `doj cache list [--json] [--cache-dir ...]`
-- `doj trust add|remove|list|clear` for remote script trust entries
-- `doj run --trust <http(s)://.../script.java>` / `doj build --trust <http(s)://.../script.java>`
-- `doj app install <script.java>` install a script as a PATH command
-- `doj app uninstall <name>` remove an installed command
-- `doj app list` list installed script commands
-- `doj info classpath <script.java>`
-- `doj info tools <script.java>` with `--select`
-- `doj info docs <script.java>`
-- `doj info cache [--cache-dir ...]`
-- `doj info main|java|description|gav|module <script.java>`
-- `doj info deps|repos|sources|files <script.java>`
-- `doj info compile-options|runtime-options|native-options|javaagents|manifest <script.java>`
-- `doj <script.java> [args...]` JBang-style shorthand
+- `juv run <script.java> [args...]`
+- `juv build <script.java>`
+- `juv init <script.java>` default Java template generation
+- `juv cache clear`
+- `juv cache path [--cache-dir ...]`
+- `juv cache list [--json] [--cache-dir ...]`
+- `juv trust add|remove|list|clear` for remote script trust entries
+- `juv run --trust <http(s)://.../script.java>` / `juv build --trust <http(s)://.../script.java>`
+- `juv app install <script.java>` install a script as a PATH command
+- `juv app uninstall <name>` remove an installed command
+- `juv app list` list installed script commands
+- `juv info classpath <script.java>`
+- `juv info tools <script.java>` with `--select`
+- `juv info docs <script.java>`
+- `juv info cache [--cache-dir ...]`
+- `juv info main|java|description|gav|module <script.java>`
+- `juv info deps|repos|sources|files <script.java>`
+- `juv info compile-options|runtime-options|native-options|javaagents|manifest <script.java>`
+- `juv <script.java> [args...]` JBang-style shorthand
 - directive parsing for:
   - `//JAVA`
   - `//DEPS`
@@ -47,21 +47,21 @@ Implemented now:
   - `//CDS`
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
-- `doj build` compiles scripts into cache without running them
-- `doj init` creates default Java scripts, supports `--deps`, `--java`, and `--force`
-- `doj cache clear` clears the compiled-script cache
-- `doj cache path` prints the effective compiled-script cache directory
-- `doj cache list` lists cached script entries with their classes/cache directories and supports `--json`
-- `doj trust add <url>` stores the current remote script content hash
-- `doj trust list`, `remove`, and `clear` manage trusted remote script entries
+- `juv build` compiles scripts into cache without running them
+- `juv init` creates default Java scripts, supports `--deps`, `--java`, and `--force`
+- `juv cache clear` clears the compiled-script cache
+- `juv cache path` prints the effective compiled-script cache directory
+- `juv cache list` lists cached script entries with their classes/cache directories and supports `--json`
+- `juv trust add <url>` stores the current remote script content hash
+- `juv trust list`, `remove`, and `clear` manage trusted remote script entries
 - remote `http://` and `https://` scripts are downloaded into cache and require matching trust before build/run unless `--trust` is passed
-- `doj info classpath` prints the script runtime classpath, with `--deps-only`
-- `doj info tools` prints JSON metadata for tooling and supports selecting a single field
-- `doj info docs` prints description and documentation references
-- `doj info main`, `java`, `description`, `gav`, and `module` print single metadata values
-- `doj info deps`, `repos`, `sources`, and `files` print directive collections one-per-line
-- `doj info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
-- `doj info cache` prints the effective cache directory
+- `juv info classpath` prints the script runtime classpath, with `--deps-only`
+- `juv info tools` prints JSON metadata for tooling and supports selecting a single field
+- `juv info docs` prints description and documentation references
+- `juv info main`, `java`, `description`, `gav`, and `module` print single metadata values
+- `juv info deps`, `repos`, `sources`, and `files` print directive collections one-per-line
+- `juv info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
+- `juv info cache` prints the effective cache directory
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
@@ -83,7 +83,7 @@ class Hello {
 ```
 
 ```bash
-doj run Hello.java world
+juv run Hello.java world
 # hello world
 ```
 

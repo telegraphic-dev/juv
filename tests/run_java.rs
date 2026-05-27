@@ -1,12 +1,12 @@
 use std::fs;
 use std::process::{Command, Output};
 
-fn doj_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_doj"))
+fn juv_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_juv"))
 }
 
-fn run_doj(args: &[&std::path::Path], text_args: &[&str]) -> Output {
-    let mut cmd = doj_command();
+fn run_juv(args: &[&std::path::Path], text_args: &[&str]) -> Output {
+    let mut cmd = juv_command();
     for arg in args {
         cmd.arg(arg);
     }
@@ -33,7 +33,7 @@ class Hello {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &src], &["world"]);
+    let out = run_juv(&[std::path::Path::new("run"), &src], &["world"]);
 
     assert!(
         out.status.success(),
@@ -63,7 +63,7 @@ public class Packaged {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -101,7 +101,7 @@ class Main {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &main], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &main], &[]);
 
     assert!(
         out.status.success(),
@@ -139,7 +139,7 @@ class Main {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &main], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &main], &[]);
 
     assert!(
         out.status.success(),
@@ -171,7 +171,7 @@ class ReadResource {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -189,17 +189,17 @@ fn applies_runtime_options_from_directive() {
     fs::write(
         &src,
         r#"
-//RUNTIME_OPTIONS -Ddoj.test.value=runtime-ok
+//RUNTIME_OPTIONS -Djuv.test.value=runtime-ok
 class RuntimeProp {
   public static void main(String[] args) {
-    System.out.print(System.getProperty("doj.test.value"));
+    System.out.print(System.getProperty("juv.test.value"));
   }
 }
 "#,
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -232,7 +232,7 @@ class PreviewSwitch {
     )
     .unwrap();
 
-    let out = run_doj(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -333,7 +333,7 @@ class UseDep {
     .unwrap();
 
     let old_path = std::env::var("PATH").unwrap_or_default();
-    let out = doj_command()
+    let out = juv_command()
         .env("PATH", format!("{}:{old_path}", fake_bin.display()))
         .arg("run")
         .arg(&app)
