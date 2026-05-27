@@ -150,13 +150,23 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
                 match tag.as_str() {
                     // parent parsed via path matching
                     "dependency" => {
-                        in_dep = true;
-                        dep_group_id.clear();
-                        dep_artifact_id.clear();
-                        dep_version.clear();
-                        dep_scope.clear();
-                        dep_optional = false;
-                        dep_exclusions.clear();
+                        // Only capture dependencies under <dependencies> or
+                        // <dependencyManagement>, not plugin deps under
+                        // <build>/<plugins>/<plugin>
+                        let in_project_deps = (path.iter().any(|p| p == "dependencies")
+                            || path.iter().any(|p| p == "dependencyManagement"))
+                            && !path
+                                .iter()
+                                .any(|p| p == "plugins" || p == "plugin" || p == "build");
+                        if in_project_deps {
+                            in_dep = true;
+                            dep_group_id.clear();
+                            dep_artifact_id.clear();
+                            dep_version.clear();
+                            dep_scope.clear();
+                            dep_optional = false;
+                            dep_exclusions.clear();
+                        }
                     }
                     "dependencyManagement" => in_dep_mgmt = true,
                     // exclusions parsed via path matching

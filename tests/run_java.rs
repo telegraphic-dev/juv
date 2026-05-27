@@ -314,8 +314,11 @@ public class Greeter {
     )
     .unwrap();
 
-    // Start a tiny HTTP server to serve the local Maven repo
-    let port = 19876;
+    // Find a free ephemeral port to avoid conflicts in parallel CI
+    let port = {
+        let s = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        s.local_addr().unwrap().port()
+    };
     let server_script = tmp.path().join("serve.sh");
     let repo_dir = tmp.path().join("repo");
     fs::write(
