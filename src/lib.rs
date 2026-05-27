@@ -1954,6 +1954,27 @@ pub struct ExportOptions {
     pub trust_remote: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct NativeExportOptions {
+    pub script: PathBuf,
+    pub output: Option<PathBuf>,
+    pub force: bool,
+    pub native_image: Option<PathBuf>,
+    pub extra_native_options: Vec<String>,
+    pub extra_deps: Vec<String>,
+    pub extra_repos: Vec<String>,
+    pub extra_sources: Vec<String>,
+    pub extra_files: Vec<String>,
+    pub classpath: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub java_version: Option<String>,
+    pub main_class: Option<String>,
+    pub cache_dir: Option<PathBuf>,
+    pub trust_remote: bool,
+}
+
 pub fn export_jar(options: ExportOptions) -> Result<PathBuf> {
     let output_path = export_output_path(&options.script, options.output)?;
     if output_path.exists() && !options.force {
@@ -1999,6 +2020,118 @@ pub fn export_jar(options: ExportOptions) -> Result<PathBuf> {
         }
     }
     Ok(output_path)
+}
+
+pub fn export_native(options: NativeExportOptions) -> Result<PathBuf> {
+    let output_path = native_export_output_path(&options.script, options.output)?;
+    if output_path.exists() && !options.force {
+        return Err(anyhow!(
+            "native export target {} already exists; use --force to overwrite",
+            output_path.display()
+        ));
+    }
+    if let Some(parent) = output_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+
+    let build = build_java(BuildOptions {
+        script: options.script,
+        extra_deps: options.extra_deps,
+        extra_repos: options.extra_repos,
+        extra_sources: options.extra_sources,
+        extra_files: options.extra_files,
+        classpath: options.classpath,
+        javac_options: options.javac_options,
+        runtime_options: options.runtime_options,
+        java_agents: options.java_agents,
+        java_version: options.java_version,
+        main_class: options.main_class,
+        cache_dir: options.cache_dir,
+        trust_remote: options.trust_remote,
+    })?;
+    let main_class = build.main_class.ok_or_else(|| {
+        anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
+    })?;
+
+    let native_image = match options.native_image {
+        Some(path) => path,
+        None => find_native_image(&build.directives.java_version)?,
+    };
+    let mut native_cmd = Command::new(&native_image);
+    native_cmd.args(&build.directives.native_options);
+    native_cmd.args(&options.extra_native_options);
+    let mut runtime_cp = vec![build.classes_dir];
+    runtime_cp.extend(build.classpath);
+    native_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
+    let raw_name = native_output_name(&output_path)?;
+    let image_name = if cfg!(windows) {
+        raw_name
+            .strip_suffix(".exe")
+            .unwrap_or(&raw_name)
+            .to_string()
+    } else {
+        raw_name
+    };
+    native_cmd.arg(format!("-H:Name={image_name}"));
+    if let Some(parent) = output_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        native_cmd.arg(format!("-H:Path={}", parent.display()));
+    }
+    native_cmd.arg(main_class);
+    let status = native_cmd
+        .status()
+        .with_context(|| format!("failed to execute {}", native_image.display()))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "native-image failed with exit code {}",
+            status.code().unwrap_or(1)
+        ));
+    }
+    Ok(output_path)
+}
+
+fn native_export_output_path(script: &Path, output: Option<PathBuf>) -> Result<PathBuf> {
+    let mut path = match output {
+        Some(path) => path,
+        None => {
+            let stem = script.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+                anyhow!(
+                    "could not infer native export filename from {}",
+                    script.display()
+                )
+            })?;
+            PathBuf::from(stem)
+        }
+    };
+    if cfg!(windows) && path.extension().is_none() {
+        path.set_extension("exe");
+    }
+    Ok(path)
+}
+
+fn native_output_name(output_path: &Path) -> Result<String> {
+    output_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+        .ok_or_else(|| anyhow!("invalid native export path: {}", output_path.display()))
+}
+
+fn find_native_image(java_version: &Option<String>) -> Result<PathBuf> {
+    let jdk_root = jdk::resolve_jdk(java_version, true)?;
+    let candidate = jdk_root.join("bin").join(if cfg!(windows) {
+        "native-image.cmd"
+    } else {
+        "native-image"
+    });
+    if candidate.is_file() {
+        return Ok(candidate);
+    }
+    which::which("native-image").with_context(|| {
+        format!(
+            "could not find native-image at {} or on PATH; install GraalVM native-image or pass --native-image",
+            candidate.display()
+        )
+    })
 }
 
 fn export_output_path(script: &Path, output: Option<PathBuf>) -> Result<PathBuf> {
