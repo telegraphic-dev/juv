@@ -16,21 +16,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Resolve release tag
         id: release
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.release_tag }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_RELEASE_TAG"
           else
             tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
           fi
           version="${tag#v}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Set crate version from release tag
-        run: python3 scripts/set-release-version.py "${{ steps.release.outputs.tag }}"
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: python3 scripts/set-release-version.py "$RELEASE_TAG"
       - name: Publish
         run: cargo publish --locked --allow-dirty
         env:
@@ -44,20 +54,38 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - name: Resolve release tag
         id: release
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.release_tag }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_RELEASE_TAG"
           else
             tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
           fi
           version="${tag#v}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Set crate version from release tag
-        run: python3 scripts/set-release-version.py "${{ steps.release.outputs.tag }}"
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: python3 scripts/set-release-version.py "$RELEASE_TAG"
+      - name: Use release Docker builder toolchain
+        run: python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("Dockerfile")
+          content = path.read_text()
+          path.write_text(content.replace("rust:1.86-bookworm", "rust:1.88-bookworm"))
+          PY
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
