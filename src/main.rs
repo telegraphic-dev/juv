@@ -43,6 +43,8 @@ enum Commands {
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
     Fetch(FetchCommand),
+    /// Manage installed JDKs.
+    Jdk(JdkCommand),
 }
 
 #[derive(Parser, Debug)]
@@ -282,6 +284,38 @@ struct AppUninstallCommand {
 
 #[derive(Parser, Debug)]
 struct AppListCommand;
+
+#[derive(Parser, Debug)]
+struct JdkCommand {
+    #[command(subcommand)]
+    command: JdkSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum JdkSubcommand {
+    /// List discovered and installed JDKs.
+    List(JdkListCommand),
+    /// Install a JDK from Adoptium (Eclipse Temurin).
+    Install(JdkInstallCommand),
+    /// Show JDK home directory for a given version.
+    Home(JdkHomeCommand),
+}
+
+#[derive(Parser, Debug)]
+struct JdkListCommand;
+
+#[derive(Parser, Debug)]
+struct JdkInstallCommand {
+    /// Major JDK version to install (e.g. 21, 25).
+    version: u32,
+}
+
+#[derive(Parser, Debug)]
+struct JdkHomeCommand {
+    /// Major JDK version (defaults to 25).
+    #[arg(default_value = "25")]
+    version: u32,
+}
 
 #[derive(Parser, Debug)]
 struct ResolveCommand {
@@ -1033,6 +1067,32 @@ fn main() -> Result<()> {
             }
             0
         }
+        Some(Commands::Jdk(cmd)) => match cmd.command {
+            JdkSubcommand::List(_) => {
+                let jdks = juv::jdk::list_jdks()?;
+                if jdks.is_empty() {
+                    println!("No JDKs found.");
+                } else {
+                    for (major, root) in &jdks {
+                        let version_detail = juv::jdk::detect_jdk_major_version(root)
+                            .map(|v| format!("{major}.x (detected {v})"))
+                            .unwrap_or_else(|| format!("{major}.x"));
+                        println!("{major}\t{}\t{}", version_detail, root.display());
+                    }
+                }
+                0
+            }
+            JdkSubcommand::Install(cmd) => {
+                let jdk_root = juv::jdk::install_jdk(cmd.version)?;
+                println!("JDK {} installed to {}", cmd.version, jdk_root.display());
+                0
+            }
+            JdkSubcommand::Home(cmd) => {
+                let jdk_root = juv::jdk::find_jdk(cmd.version, false)?;
+                println!("{}", jdk_root.display());
+                0
+            }
+        },
         None => {
             let Some(script) = cli.script else {
                 eprintln!("No script specified. Try: juv run Hello.java");

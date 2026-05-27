@@ -71,8 +71,14 @@ Implemented now:
 - `juv resolve --classpath <coordinates...>` resolve to classpath
 - `juv fetch <coordinates...>` fetch artifacts and print classpath
 - `juv fetch --deps-only <coordinates...>` print coordinates instead of paths
+- `juv jdk list` list discovered/cached JDKs
+- `juv jdk home [version]` print the JDK home for a version (default: 25)
+- `juv jdk install <version>` download a Temurin JDK from Adoptium
 - native Maven dependency resolver (no Coursier required)
 - reuses existing Maven (`~/.m2/repository`), Gradle (`~/.gradle/caches`), and Coursier (`~/.cache/coursier`) caches via symlinks
+- discovers existing JDKs from `JAVA_HOME`, `PATH`, JBang (`~/.jbang/jdks`), SDKMAN (`~/.sdkman/candidates/java`), mise (`~/.local/share/mise/installs`), Gradle (`~/.gradle/jdks`), and system JVM directories
+- caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
+- auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
 Not yet implemented: catalogs, templates beyond the default, export, edit integration, native image, remote relative resources, and the rest of JBang's lovely edge-case museum.
 
