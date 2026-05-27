@@ -3,9 +3,10 @@ use clap::{Parser, Subcommand};
 use std::{fs, path::PathBuf};
 
 use doj::{
-    build_java, cache_entries, clear_cache, default_cache_dir, init_script, run_java,
-    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, BuildOptions,
-    InitOptions, KeyValue, RunOptions,
+    app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, clear_cache,
+    default_cache_dir, init_script, run_java, split_directive_words, trust_add, trust_clear,
+    trust_entries, trust_remove, AppInstallOptions, BuildOptions, InitOptions, KeyValue,
+    RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -36,6 +37,8 @@ enum Commands {
     Trust(TrustCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
+    /// Manage scripts installed as commands on PATH.
+    App(AppCommand),
 }
 
 #[derive(Parser, Debug)]
@@ -236,6 +239,45 @@ struct TrustListCommand {
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
 }
+
+#[derive(Parser, Debug)]
+struct AppCommand {
+    #[command(subcommand)]
+    command: AppSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum AppSubcommand {
+    /// Install a script as a command on PATH.
+    Install(AppInstallCommand),
+    /// Remove an installed command.
+    Uninstall(AppUninstallCommand),
+    /// List installed script commands.
+    List(AppListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct AppInstallCommand {
+    /// Command name (defaults to the script filename stem).
+    #[arg(long = "name", short = 'n')]
+    name: Option<String>,
+
+    /// Force overwrite an existing command.
+    #[arg(long = "force")]
+    force: bool,
+
+    /// Java source file to install.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct AppUninstallCommand {
+    /// Command name to remove.
+    name: String,
+}
+
+#[derive(Parser, Debug)]
+struct AppListCommand;
 
 #[derive(Parser, Debug)]
 struct CacheClearCommand {
@@ -844,6 +886,42 @@ fn main() -> Result<()> {
             InfoSubcommand::Directives(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
                 println!("{:#?}", doj::parse_directives(&source));
+                0
+            }
+        },
+        Some(Commands::App(cmd)) => match cmd.command {
+            AppSubcommand::Install(cmd) => {
+                let wrapper = app_install(AppInstallOptions {
+                    script: cmd.script,
+                    name: cmd.name,
+                    force: cmd.force,
+                })?;
+                println!("Command installed: {}", wrapper.display());
+                let bin_dir = app_bin_dir()?;
+                eprintln!(
+                    "Add {} to your PATH to use installed commands.",
+                    bin_dir.display()
+                );
+                0
+            }
+            AppSubcommand::Uninstall(cmd) => {
+                let removed = app_uninstall(&cmd.name)?;
+                if removed {
+                    println!("Command uninstalled: {}", cmd.name);
+                } else {
+                    println!("Command '{}' not found.", cmd.name);
+                }
+                0
+            }
+            AppSubcommand::List(_) => {
+                let entries = app_list()?;
+                if entries.is_empty() {
+                    println!("No commands installed.");
+                } else {
+                    for entry in &entries {
+                        println!("{}\t{}", entry.name, entry.target);
+                    }
+                }
                 0
             }
         },

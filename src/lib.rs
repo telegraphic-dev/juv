@@ -863,3 +863,176 @@ fn split_classpath(text: &str) -> Vec<PathBuf> {
         .map(PathBuf::from)
         .collect()
 }
+
+// ── App install / uninstall / list ──────────────────────────────────────
+
+pub fn app_bin_dir() -> Result<PathBuf> {
+    Ok(dirs::data_local_dir()
+        .or_else(dirs::data_dir)
+        .ok_or_else(|| anyhow!("could not determine local data directory"))?
+        .join("doj")
+        .join("bin"))
+}
+
+pub struct AppInstallOptions {
+    pub script: PathBuf,
+    pub name: Option<String>,
+    pub force: bool,
+}
+
+pub fn app_install(options: AppInstallOptions) -> Result<PathBuf> {
+    let bin_dir = app_bin_dir()?;
+    fs::create_dir_all(&bin_dir)?;
+
+    let script = fs::canonicalize(&options.script)
+        .with_context(|| format!("script not found: {}", options.script.display()))?;
+
+    let name = options
+        .name
+        .or_else(|| {
+            script
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        })
+        .ok_or_else(|| anyhow!("could not determine command name from script path"))?;
+
+    validate_app_name(&name)?;
+
+    let wrapper = bin_dir.join(&name);
+    if wrapper.exists() && !options.force {
+        return Err(anyhow!(
+            "command '{}' already exists; use --force to overwrite",
+            name
+        ));
+    }
+
+    let doj_path = find_doj_binary()?;
+
+    // Build the wrapper script content
+    let content = format!(
+        "#!/bin/sh\nexec {} run -- {} \"$@\"\n",
+        shell_quote_path(&doj_path),
+        shell_quote_path(&script)
+    );
+    fs::write(&wrapper, content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755))?;
+    }
+
+    Ok(wrapper)
+}
+
+pub fn app_uninstall(name: &str) -> Result<bool> {
+    validate_app_name(name)?;
+    let bin_dir = app_bin_dir()?;
+    let mut removed = false;
+    // Remove all variants: name, name.cmd, name.ps1
+    for ext in &["", ".cmd", ".ps1"] {
+        let path = bin_dir.join(format!("{name}{ext}"));
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+            removed = true;
+        }
+    }
+    Ok(removed)
+}
+
+pub struct AppEntry {
+    pub name: String,
+    pub target: String,
+}
+
+pub fn app_list() -> Result<Vec<AppEntry>> {
+    let bin_dir = app_bin_dir()?;
+    if !bin_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&bin_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        // Skip Windows helper scripts
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if ext == "cmd" || ext == "ps1" {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        // Parse the wrapper to extract the target script
+        let target = parse_wrapper_target(&path).unwrap_or_else(|| "(unknown)".to_string());
+        entries.push(AppEntry { name, target });
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(entries)
+}
+
+fn validate_app_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Err(anyhow!("command name cannot be empty"));
+    }
+    if name == "doj" {
+        return Err(anyhow!("'doj' is a reserved command name"));
+    }
+    // Must be a portable filename
+    let valid =
+        !name.chars().any(|c| c == '/' || c == '\\' || c == '\0') && name != "." && name != "..";
+    if !valid {
+        return Err(anyhow!("'{name}' is not a valid command name"));
+    }
+    Ok(())
+}
+
+fn find_doj_binary() -> Result<PathBuf> {
+    // Prefer the currently-running binary if possible
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.exists() {
+            return Ok(exe);
+        }
+    }
+    which::which("doj").context("could not locate doj binary on PATH")
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    // Simple quoting: wrap in single quotes, escape any embedded single quotes
+    if s.contains('\'') {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    } else if s.contains(char::is_whitespace) || s.contains('$') {
+        format!("'{s}'")
+    } else {
+        s.to_string()
+    }
+}
+
+fn parse_wrapper_target(wrapper: &Path) -> Option<String> {
+    let content = fs::read_to_string(wrapper).ok()?;
+    // Wrapper line looks like: exec /path/to/doj run -- /path/to/script.java "$@"
+    // Or with quoting:          exec /path/to/doj run -- '/path/with spaces/script.java' "$@"
+    for line in content.lines() {
+        if let Some(rest) = line.strip_prefix("exec ") {
+            if let Some(idx) = rest.find(" run -- ") {
+                let marker = " run -- ";
+                let after = &rest[idx + marker.len()..];
+                let target = after.strip_suffix(" \"$@\"").unwrap_or(after);
+                let target = target.trim();
+                // Strip single-quote wrapping added by shell_quote_path
+                let target = target
+                    .strip_prefix('\'')
+                    .and_then(|t| t.strip_suffix('\''))
+                    .unwrap_or(target);
+                return Some(target.trim().to_string());
+            }
+        }
+    }
+    None
+}
