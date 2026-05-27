@@ -389,17 +389,20 @@ impl Repository {
         )
     }
 
-    /// Build the URL for a module's JAR.
-    pub fn jar_url(&self, module: &Module, version: &str) -> String {
+    /// Build the URL for a module's JAR, optionally with a classifier.
+    pub fn jar_url(&self, module: &Module, version: &str, classifier: Option<&str>) -> String {
         let group_path = module.org.replace('.', "/");
+        let jar_filename = match classifier {
+            Some(c) => format!("{}-{}-{}.jar", module.name, version, c),
+            None => format!("{}-{}.jar", module.name, version),
+        };
         format!(
-            "{}/{}/{}/{}/{}-{}.jar",
+            "{}/{}/{}/{}/{}",
             self.url.trim_end_matches('/'),
             group_path,
             module.name,
             version,
-            module.name,
-            version
+            jar_filename
         )
     }
 }
@@ -424,11 +427,12 @@ pub fn fetch_pom(module: &Module, version: &str, repos: &[Repository]) -> Result
 
 // ─── Resolution Algorithm ────────────────────────────────────────────────────
 
-/// Resolved artifact: a module at a specific version with its JAR path.
+/// Resolved artifact: a module at a specific version with optional classifier.
 #[derive(Debug, Clone)]
 pub struct ResolvedArtifact {
     pub module: Module,
     pub version: String,
+    pub classifier: Option<String>,
 }
 
 impl fmt::Display for ResolvedArtifact {
@@ -460,7 +464,7 @@ pub fn resolve(
 
     // Resolution state
     let mut project_cache: HashMap<(Module, String), Project> = HashMap::new();
-    let mut resolved: HashMap<Module, String> = HashMap::new(); // module → chosen version
+    let mut resolved: HashMap<Module, (String, Option<String>)> = HashMap::new(); // module → (version, classifier)
     let mut queue: Vec<Dependency> = root_deps.clone();
     let mut iterations = 0;
     let max_iterations = 2000; // safety limit
@@ -474,7 +478,7 @@ pub fn resolve(
             // (handled at extraction time, but double-check here)
 
             // Version reconciliation: if we already resolved this module, use that version
-            let version = if let Some(chosen) = resolved.get(&dep.module) {
+            let version = if let Some((chosen, _)) = resolved.get(&dep.module) {
                 chosen.clone()
             } else {
                 dep.version.clone()
@@ -495,7 +499,7 @@ pub fn resolve(
                 // the old module and track the relocation target instead
                 if let Some(ref reloc) = effective.relocation {
                     resolved.remove(&dep.module);
-                    resolved.insert(reloc.module.clone(), reloc.version.clone());
+                    resolved.insert(reloc.module.clone(), (reloc.version.clone(), None));
                     let reloc_key = (reloc.module.clone(), reloc.version.clone());
                     if !project_cache.contains_key(&reloc_key) {
                         // Fetch the relocated project in the next iteration
@@ -508,29 +512,33 @@ pub fn resolve(
                 project_cache.insert(cache_key.clone(), effective);
             }
 
-            // Record the chosen version
-            resolved.insert(dep.module.clone(), version);
+            // Record the chosen version + classifier
+            resolved.insert(dep.module.clone(), (version, dep.classifier.clone()));
         }
 
         // Extract transitive deps from all newly-fetched projects
         for dep in &queue {
-            let version = resolved
+            let (version, _) = resolved
                 .get(&dep.module)
                 .cloned()
-                .unwrap_or_else(|| dep.version.clone());
+                .unwrap_or_else(|| (dep.version.clone(), dep.classifier.clone()));
             let cache_key = (dep.module.clone(), version.clone());
             if let Some(project) = project_cache.get(&cache_key) {
                 let transitive = extract_dependencies(project, dep);
                 for t in transitive {
                     // Version reconciliation: if already resolved, use higher version
                     let effective_version = match resolved.get(&t.module) {
-                        Some(existing) => {
+                        Some((existing, _)) => {
                             let higher = pick_higher_version(existing, &t.version);
-                            resolved.insert(t.module.clone(), higher.clone());
+                            resolved
+                                .insert(t.module.clone(), (higher.clone(), t.classifier.clone()));
                             higher
                         }
                         None => {
-                            resolved.insert(t.module.clone(), t.version.clone());
+                            resolved.insert(
+                                t.module.clone(),
+                                (t.version.clone(), t.classifier.clone()),
+                            );
                             t.version.clone()
                         }
                     };
@@ -563,9 +571,10 @@ pub fn resolve(
     // Build the final artifact list
     let mut artifacts: Vec<ResolvedArtifact> = resolved
         .iter()
-        .map(|(module, version)| ResolvedArtifact {
+        .map(|(module, (version, classifier))| ResolvedArtifact {
             module: module.clone(),
             version: version.clone(),
+            classifier: classifier.clone(),
         })
         .collect();
 
@@ -612,7 +621,10 @@ pub fn resolve_classpath(
     let mut paths: Vec<PathBuf> = Vec::new();
     for artifact in &artifacts {
         let group_path = artifact.module.org.replace('.', "/");
-        let jar_name = format!("{}-{}.jar", artifact.module.name, artifact.version);
+        let jar_name = match &artifact.classifier {
+            Some(c) => format!("{}-{}-{}.jar", artifact.module.name, artifact.version, c),
+            None => format!("{}-{}.jar", artifact.module.name, artifact.version),
+        };
         let jar_path = cache_dir
             .join(&group_path)
             .join(&artifact.module.name)
@@ -730,16 +742,44 @@ fn resolve_parent_chain(
     repos: &[Repository],
     cache: &mut HashMap<(Module, String), Project>,
 ) -> Result<Project> {
+    resolve_parent_chain_inner(project, repos, cache, &mut HashSet::new(), 0)
+}
+
+fn resolve_parent_chain_inner(
+    project: &Project,
+    repos: &[Repository],
+    cache: &mut HashMap<(Module, String), Project>,
+    seen: &mut HashSet<(Module, String)>,
+    depth: usize,
+) -> Result<Project> {
+    const MAX_DEPTH: usize = 50;
+    if depth > MAX_DEPTH {
+        return Err(anyhow!(
+            "parent POM chain exceeds {MAX_DEPTH} levels — possible circular reference"
+        ));
+    }
+
     let mut effective = project.clone();
 
     if let Some((ref parent_module, ref parent_version)) = project.parent {
         let cache_key = (parent_module.clone(), parent_version.clone());
+
+        // Cycle detection: if we've already seen this parent, break the loop
+        if seen.contains(&cache_key) {
+            return Err(anyhow!(
+                "circular parent POM reference detected: {}:{}",
+                parent_module,
+                parent_version
+            ));
+        }
+        seen.insert(cache_key.clone());
+
         let parent = if let Some(p) = cache.get(&cache_key) {
             p.clone()
         } else {
             let p = fetch_pom(parent_module, parent_version, repos)?;
-            let resolved = resolve_parent_chain(&p, repos, cache)?;
-            cache.insert(cache_key, resolved.clone());
+            let resolved = resolve_parent_chain_inner(&p, repos, cache, seen, depth + 1)?;
+            cache.insert(cache_key.clone(), resolved.clone());
             resolved
         };
 
@@ -867,8 +907,8 @@ fn pick_higher_version(a: &str, b: &str) -> String {
         let oa = qualifier_order(sa);
         let ob = qualifier_order(sb);
         if oa != ob {
-            // Lower qualifier order = more mature/release → wins
-            if oa < ob {
+            // Higher qualifier order = more mature/release → wins
+            if oa > ob {
                 return a.to_string();
             } else {
                 return b.to_string();
@@ -892,11 +932,36 @@ fn pick_higher_version(a: &str, b: &str) -> String {
             }
         }
     }
-    // If all compared parts are equal, the longer version wins (1.0.0 > 1.0)
-    if pa.len() >= pb.len() {
-        a.to_string()
-    } else {
-        b.to_string()
+    // If all compared parts are equal, check for trailing qualifier segments.
+    // The version with extra pre-release parts (SNAPSHOT, alpha, etc.) should LOSE
+    // to the version without them. E.g. "2.0.0" > "2.0.0-SNAPSHOT".
+    let a_tail = pa.get(pb.len()).map(|s| qualifier_order(s));
+    let b_tail = pb.get(pa.len()).map(|s| qualifier_order(s));
+    match (a_tail, b_tail) {
+        // a has extra parts, b doesn't — a wins only if extra part is release-like
+        (Some(qa), None) => {
+            if qa >= 10 {
+                a.to_string()
+            } else {
+                b.to_string()
+            }
+        }
+        // b has extra parts, a doesn't — b wins only if extra part is release-like
+        (None, Some(qb)) => {
+            if qb >= 10 {
+                b.to_string()
+            } else {
+                a.to_string()
+            }
+        }
+        // Both have extra parts (equal length, already compared above) or neither
+        _ => {
+            if pa.len() >= pb.len() {
+                a.to_string()
+            } else {
+                b.to_string()
+            }
+        }
     }
 }
 
@@ -934,7 +999,10 @@ fn download_jar(
     // Use groupId path segments to avoid collisions between artifacts
     // with the same artifactId+version from different groups.
     let group_path = artifact.module.org.replace('.', "/");
-    let jar_name = format!("{}-{}.jar", artifact.module.name, artifact.version);
+    let jar_name = match &artifact.classifier {
+        Some(c) => format!("{}-{}-{}.jar", artifact.module.name, artifact.version, c),
+        None => format!("{}-{}.jar", artifact.module.name, artifact.version),
+    };
     let jar_path = cache_dir
         .join(&group_path)
         .join(&artifact.module.name)
@@ -957,7 +1025,11 @@ fn download_jar(
 
     // 3. Download from remote repositories
     for repo in repos {
-        let url = repo.jar_url(&artifact.module, &artifact.version);
+        let url = repo.jar_url(
+            &artifact.module,
+            &artifact.version,
+            artifact.classifier.as_deref(),
+        );
         match ureq::get(&url).call() {
             Ok(response) => {
                 if let Some(parent) = jar_path.parent() {
@@ -1335,6 +1407,19 @@ mod tests {
             pick_higher_version("33.3.1-jre", "33.3.0-jre"),
             "33.3.1-jre"
         );
+        // Release beats SNAPSHOT (SNAPSHOT is pre-release)
+        assert_eq!(pick_higher_version("2.0.0-SNAPSHOT", "2.0.0"), "2.0.0");
+        assert_eq!(pick_higher_version("2.0.0", "2.0.0-SNAPSHOT"), "2.0.0");
+        // Release beats alpha/beta/RC
+        assert_eq!(pick_higher_version("1.0-alpha1", "1.0"), "1.0");
+        assert_eq!(pick_higher_version("1.0", "1.0-beta1"), "1.0");
+        assert_eq!(pick_higher_version("1.0-RC1", "1.0"), "1.0");
+        // RC beats beta beats alpha
+        assert_eq!(pick_higher_version("1.0-alpha1", "1.0-beta1"), "1.0-beta1");
+        assert_eq!(pick_higher_version("1.0-beta1", "1.0-RC1"), "1.0-RC1");
+        assert_eq!(pick_higher_version("1.0-RC1", "1.0-SNAPSHOT"), "1.0-RC1");
+        // Longer release version beats shorter (1.0.0 > 1.0)
+        assert_eq!(pick_higher_version("1.0", "1.0.0"), "1.0.0");
     }
 
     #[test]
