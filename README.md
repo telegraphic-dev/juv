@@ -14,6 +14,8 @@ Implemented now:
 - `doj cache clear`
 - `doj cache path [--cache-dir ...]`
 - `doj cache list [--json] [--cache-dir ...]`
+- `doj trust add|remove|list|clear` for remote script trust entries
+- `doj run --trust <http(s)://.../script.java>` / `doj build --trust <http(s)://.../script.java>`
 - `doj info classpath <script.java>`
 - `doj info tools <script.java>` with `--select`
 - `doj info docs <script.java>`
@@ -47,6 +49,9 @@ Implemented now:
 - `doj cache clear` clears the compiled-script cache
 - `doj cache path` prints the effective compiled-script cache directory
 - `doj cache list` lists cached script entries with their classes/cache directories and supports `--json`
+- `doj trust add <url>` stores the current remote script content hash
+- `doj trust list`, `remove`, and `clear` manage trusted remote script entries
+- remote `http://` and `https://` scripts are downloaded into cache and require matching trust before build/run unless `--trust` is passed
 - `doj info classpath` prints the script runtime classpath, with `--deps-only`
 - `doj info tools` prints JSON metadata for tooling and supports selecting a single field
 - `doj info docs` prints description and documentation references
@@ -61,7 +66,7 @@ Implemented now:
 - `//PREVIEW` compile/runtime flag handling
 - dependency resolution through Coursier when `//DEPS` is used
 
-Not yet implemented: catalogs, app install, templates, trust, export, edit integration, native image, full remote script handling, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalogs, app install, templates beyond the default, export, edit integration, native image, remote relative resources, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

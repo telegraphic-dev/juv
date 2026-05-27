@@ -63,6 +63,7 @@ pub struct RunOptions {
     pub java_version: Option<String>,
     pub main_class: Option<String>,
     pub cache_dir: Option<PathBuf>,
+    pub trust_remote: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +80,7 @@ pub struct BuildOptions {
     pub java_version: Option<String>,
     pub main_class: Option<String>,
     pub cache_dir: Option<PathBuf>,
+    pub trust_remote: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -299,10 +301,8 @@ fn split_space_words(text: &str) -> Vec<String> {
 fn split_words(text: &str, comma_semicolon_are_separators: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
-    let mut chars = text.chars().peekable();
     let mut quote: Option<char> = None;
-
-    while let Some(ch) = chars.next() {
+    for ch in text.chars() {
         match quote {
             Some(q) if ch == q => quote = None,
             Some(_) => cur.push(ch),
@@ -323,11 +323,182 @@ fn split_words(text: &str, comma_semicolon_are_separators: bool) -> Vec<String> 
     out
 }
 
+pub fn trust_entries(cache_dir: Option<&Path>) -> Result<Vec<(String, String)>> {
+    let path = trust_store_path(cache_dir)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    for line in fs::read_to_string(&path)?.lines() {
+        let Some((url, hash)) = line.split_once('\t') else {
+            continue;
+        };
+        if !url.is_empty() && !hash.is_empty() {
+            entries.push((url.to_string(), hash.to_string()));
+        }
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(entries)
+}
+
+pub fn trust_add(url: &str, cache_dir: Option<&Path>) -> Result<String> {
+    ensure_remote_url(url)?;
+    let source = fetch_remote_script(url)?;
+    let hash = sha256_hex(&source);
+    write_trust_entry(url, &hash, cache_dir)?;
+    Ok(hash)
+}
+
+pub fn trust_remove(url: &str, cache_dir: Option<&Path>) -> Result<bool> {
+    let path = trust_store_path(cache_dir)?;
+    let mut entries = trust_entries(cache_dir)?;
+    let before = entries.len();
+    entries.retain(|(entry_url, _)| entry_url != url);
+    write_trust_entries(&path, &entries)?;
+    Ok(entries.len() != before)
+}
+
+pub fn trust_clear(cache_dir: Option<&Path>) -> Result<()> {
+    let path = trust_store_path(cache_dir)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+struct MaterializedScript {
+    path: PathBuf,
+    source: String,
+}
+
+fn materialize_script(
+    script: &Path,
+    cache_dir: Option<&Path>,
+    trust_remote: bool,
+) -> Result<MaterializedScript> {
+    let script_text = script.to_string_lossy();
+    if is_remote_url(&script_text) {
+        let source = fetch_remote_script(&script_text)?;
+        let hash = sha256_hex(&source);
+        if trust_remote {
+            write_trust_entry(&script_text, &hash, cache_dir)?;
+        } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
+            return Err(anyhow!(
+                "remote script {} is not trusted; run `doj trust add {}` or pass `doj run --trust {}`",
+                script_text,
+                script_text,
+                script_text
+            ));
+        }
+        let root = match cache_dir {
+            Some(path) => path.to_path_buf(),
+            None => default_cache_dir()?,
+        };
+        let file_name = remote_file_name(&script_text);
+        let remote_dir = root.join("remote-sources").join(&hash[..16]);
+        fs::create_dir_all(&remote_dir)?;
+        let path = remote_dir.join(file_name);
+        fs::write(&path, &source)?;
+        return Ok(MaterializedScript { path, source });
+    }
+
+    let path = fs::canonicalize(script)
+        .with_context(|| format!("script not found: {}", script.display()))?;
+    let source =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(MaterializedScript { path, source })
+}
+
+fn is_remote_url(text: &str) -> bool {
+    text.starts_with("http://") || text.starts_with("https://")
+}
+
+fn ensure_remote_url(url: &str) -> Result<()> {
+    if is_remote_url(url) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "trusted script must be an http:// or https:// URL: {url}"
+        ))
+    }
+}
+
+fn fetch_remote_script(url: &str) -> Result<String> {
+    ensure_remote_url(url)?;
+    let response = ureq::get(url)
+        .call()
+        .map_err(|err| anyhow!("failed to download {url}: {err}"))?;
+    response
+        .into_string()
+        .map_err(|err| anyhow!("failed to read response from {url}: {err}"))
+}
+
+fn is_trusted_remote(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<bool> {
+    Ok(trust_entries(cache_dir)?
+        .iter()
+        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash))
+}
+
+fn write_trust_entry(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<()> {
+    let path = trust_store_path(cache_dir)?;
+    let mut entries = trust_entries(cache_dir)?;
+    entries.retain(|(entry_url, _)| entry_url != url);
+    entries.push((url.to_string(), hash.to_string()));
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    write_trust_entries(&path, &entries)
+}
+
+fn write_trust_entries(path: &Path, entries: &[(String, String)]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut out = String::new();
+    for (url, hash) in entries {
+        out.push_str(url);
+        out.push('\t');
+        out.push_str(hash);
+        out.push('\n');
+    }
+    fs::write(path, out)?;
+    Ok(())
+}
+
+fn trust_store_path(cache_dir: Option<&Path>) -> Result<PathBuf> {
+    let root = match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    };
+    Ok(root.join("trust.tsv"))
+}
+
+fn remote_file_name(url: &str) -> String {
+    let path = url.split('?').next().unwrap_or(url);
+    let name = path
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("RemoteScript.java");
+    if name.ends_with(".java") {
+        name.to_string()
+    } else {
+        format!("{name}.java")
+    }
+}
+
+fn sha256_hex(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
-    let script = fs::canonicalize(&options.script)
-        .with_context(|| format!("script not found: {}", options.script.display()))?;
-    let source = fs::read_to_string(&script)
-        .with_context(|| format!("failed to read {}", script.display()))?;
+    let materialized = materialize_script(
+        &options.script,
+        options.cache_dir.as_deref(),
+        options.trust_remote,
+    )?;
+    let script = materialized.path;
+    let source = materialized.source;
     let mut directives = parse_directives(&source);
     directives.deps.extend(options.extra_deps);
     directives.repos.extend(options.extra_repos);
@@ -428,6 +599,7 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         java_version: options.java_version,
         main_class: options.main_class,
         cache_dir: options.cache_dir,
+        trust_remote: options.trust_remote,
     })?;
 
     let main_class = build.main_class.ok_or_else(|| {

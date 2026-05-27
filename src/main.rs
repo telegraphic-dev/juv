@@ -4,7 +4,8 @@ use std::{fs, path::PathBuf};
 
 use doj::{
     build_java, cache_entries, clear_cache, default_cache_dir, init_script, run_java,
-    split_directive_words, BuildOptions, InitOptions, KeyValue, RunOptions,
+    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, BuildOptions,
+    InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -31,6 +32,8 @@ enum Commands {
     Init(InitCommand),
     /// Manage compiled script cache.
     Cache(CacheCommand),
+    /// Manage trusted remote scripts.
+    Trust(TrustCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
 }
@@ -87,6 +90,10 @@ struct RunCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
+
+    /// Trust this remote script content hash before running.
+    #[arg(long = "trust")]
+    trust: bool,
 
     /// Java source file.
     script: PathBuf,
@@ -149,6 +156,10 @@ struct BuildCommand {
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
 
+    /// Trust this remote script content hash before building.
+    #[arg(long = "trust")]
+    trust: bool,
+
     /// Java source file.
     script: PathBuf,
 }
@@ -189,6 +200,41 @@ enum CacheSubcommand {
     Path(CachePathCommand),
     /// List cached script entries.
     List(CacheListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct TrustCommand {
+    #[command(subcommand)]
+    command: TrustSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum TrustSubcommand {
+    /// Trust the current content hash of a remote script URL.
+    Add(TrustUrlCommand),
+    /// Remove a trusted remote script URL.
+    Remove(TrustUrlCommand),
+    /// List trusted remote script URLs and hashes.
+    List(TrustListCommand),
+    /// Clear all trusted remote script entries.
+    Clear(TrustListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct TrustUrlCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Remote http(s) Java source URL.
+    url: String,
+}
+
+#[derive(Parser, Debug)]
+struct TrustListCommand {
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -542,6 +588,7 @@ fn main() -> Result<()> {
             java_version: cmd.java_version,
             main_class: cmd.main_class,
             cache_dir: cmd.cache_dir,
+            trust_remote: cmd.trust,
         })?,
         Some(Commands::Build(cmd)) => {
             build_java(BuildOptions {
@@ -557,6 +604,7 @@ fn main() -> Result<()> {
                 java_version: cmd.java_version,
                 main_class: cmd.main_class,
                 cache_dir: cmd.cache_dir,
+                trust_remote: cmd.trust,
             })?;
             0
         }
@@ -614,6 +662,27 @@ fn main() -> Result<()> {
                 0
             }
         },
+        Some(Commands::Trust(cmd)) => match cmd.command {
+            TrustSubcommand::Add(cmd) => {
+                let hash = trust_add(&cmd.url, cmd.cache_dir.as_deref())?;
+                println!("{}\t{}", cmd.url, hash);
+                0
+            }
+            TrustSubcommand::Remove(cmd) => {
+                trust_remove(&cmd.url, cmd.cache_dir.as_deref())?;
+                0
+            }
+            TrustSubcommand::List(cmd) => {
+                for (url, hash) in trust_entries(cmd.cache_dir.as_deref())? {
+                    println!("{url}\t{hash}");
+                }
+                0
+            }
+            TrustSubcommand::Clear(cmd) => {
+                trust_clear(cmd.cache_dir.as_deref())?;
+                0
+            }
+        },
         Some(Commands::Info(cmd)) => match cmd.command {
             InfoSubcommand::Classpath(cmd) => {
                 let output = build_java(BuildOptions {
@@ -629,6 +698,7 @@ fn main() -> Result<()> {
                     java_version: cmd.java_version,
                     main_class: cmd.main_class,
                     cache_dir: cmd.cache_dir,
+                    trust_remote: false,
                 })?;
                 let mut entries = output.classpath;
                 if !cmd.deps_only {
@@ -652,6 +722,7 @@ fn main() -> Result<()> {
                     java_version: cmd.java_version,
                     main_class: cmd.main_class,
                     cache_dir: cmd.cache_dir,
+                    trust_remote: false,
                 })?;
                 let payload = tools_payload(&script, &output);
                 if let Some(field) = cmd.select {
@@ -795,6 +866,7 @@ fn main() -> Result<()> {
                 java_version: None,
                 main_class: None,
                 cache_dir: None,
+                trust_remote: false,
             })?
         }
     };
