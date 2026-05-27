@@ -275,6 +275,18 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
         }
     }
 
+    // Inject intrinsic Maven project properties
+    if !group_id.is_empty() {
+        properties.insert("project.groupId".to_string(), group_id.clone());
+        properties.insert("project.version".to_string(), version.clone());
+        properties.insert("groupId".to_string(), group_id.clone());
+        properties.insert("version".to_string(), version.clone());
+    }
+    if !artifact_id.is_empty() {
+        properties.insert("project.artifactId".to_string(), artifact_id.clone());
+        properties.insert("artifactId".to_string(), artifact_id.clone());
+    }
+
     // Apply property substitution
     let substitute = |s: &str, props: &HashMap<String, String>| -> String {
         let mut result = s.to_string();
@@ -788,6 +800,33 @@ fn resolve_parent_chain(
                 effective.dependency_management.push(managed.clone());
             }
         }
+    }
+
+    // Inject intrinsic project properties after inheritance resolution
+    if !effective.module.org.is_empty() {
+        effective
+            .properties
+            .insert("project.groupId".to_string(), effective.module.org.clone());
+        effective
+            .properties
+            .insert("groupId".to_string(), effective.module.org.clone());
+    }
+    if !effective.version.is_empty() {
+        effective
+            .properties
+            .insert("project.version".to_string(), effective.version.clone());
+        effective
+            .properties
+            .insert("version".to_string(), effective.version.clone());
+    }
+    if !effective.module.name.is_empty() {
+        effective.properties.insert(
+            "project.artifactId".to_string(),
+            effective.module.name.clone(),
+        );
+        effective
+            .properties
+            .insert("artifactId".to_string(), effective.module.name.clone());
     }
 
     // Re-apply property substitution with merged properties
