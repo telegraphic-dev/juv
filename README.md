@@ -67,9 +67,14 @@ Implemented now:
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
 - `//PREVIEW` compile/runtime flag handling
-- dependency resolution through Coursier when `//DEPS` is used
+- `juv resolve <coordinates...>` resolve Maven coordinates to dependency list
+- `juv resolve --classpath <coordinates...>` resolve to classpath
+- `juv fetch <coordinates...>` fetch artifacts and print classpath
+- `juv fetch --deps-only <coordinates...>` print coordinates instead of paths
+- native Maven dependency resolver (no Coursier required)
+- reuses existing Maven (`~/.m2/repository`), Gradle (`~/.gradle/caches`), and Coursier (`~/.cache/coursier`) caches via symlinks
 
-Not yet implemented: catalogs, app install, templates beyond the default, export, edit integration, native image, remote relative resources, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalogs, templates beyond the default, export, edit integration, native image, remote relative resources, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

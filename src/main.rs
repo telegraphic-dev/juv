@@ -41,6 +41,8 @@ enum Commands {
     App(AppCommand),
     /// Resolve Maven dependencies without running.
     Resolve(ResolveCommand),
+    /// Fetch Maven dependency artifacts and print classpath.
+    Fetch(FetchCommand),
 }
 
 #[derive(Parser, Debug)]
@@ -298,6 +300,25 @@ struct ResolveCommand {
     /// Print classpath (JAR paths) instead of coordinates.
     #[arg(long = "classpath", short = 'c')]
     classpath: bool,
+}
+
+#[derive(Parser, Debug)]
+struct FetchCommand {
+    /// Maven coordinates to fetch (groupId:artifactId:version).
+    #[arg(required = true)]
+    coordinates: Vec<String>,
+
+    /// Additional repository (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Print resolved coordinates instead of classpath.
+    #[arg(long = "deps-only")]
+    deps_only: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -973,6 +994,36 @@ fn main() -> Result<()> {
                 for artifact in &artifacts {
                     println!("{artifact}");
                 }
+            }
+            0
+        }
+        Some(Commands::Fetch(cmd)) => {
+            let cache_dir = match cmd.cache_dir {
+                Some(path) => path,
+                None => default_cache_dir()?.join("deps"),
+            };
+            let mut repos = vec![juv::resolver::Repository::central()];
+            for repo in &cmd.repos {
+                if let Some((id, url)) = repo.split_once('=') {
+                    repos.push(juv::resolver::Repository {
+                        id: id.to_string(),
+                        url: url.to_string(),
+                    });
+                } else {
+                    repos.push(juv::resolver::Repository {
+                        id: repo.clone(),
+                        url: repo.clone(),
+                    });
+                }
+            }
+            if cmd.deps_only {
+                let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
+                for artifact in &artifacts {
+                    println!("{artifact}");
+                }
+            } else {
+                let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
+                println!("{}", std::env::join_paths(paths)?.to_string_lossy());
             }
             0
         }

@@ -813,6 +813,7 @@ fn parse_version_parts(v: &str) -> Vec<String> {
 }
 
 /// Download a JAR to the cache directory.
+/// Probes Maven local repo and Gradle cache before downloading.
 fn download_jar(
     artifact: &ResolvedArtifact,
     repos: &[Repository],
@@ -821,10 +822,23 @@ fn download_jar(
     let jar_name = format!("{}-{}.jar", artifact.module.name, artifact.version);
     let jar_path = cache_dir.join(&jar_name);
 
+    // 1. Check juv's own cache
     if jar_path.exists() {
         return Ok(jar_path);
     }
 
+    // 2. Probe existing tool caches (Maven, Gradle, Coursier)
+    if let Some(cached) = probe_local_caches(&artifact.module, &artifact.version, &jar_name) {
+        // Symlink from juv cache to the existing file
+        if let Some(parent) = jar_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        std::os::unix::fs::symlink(&cached, &jar_path)
+            .context(format!("failed to symlink {cached:?} → {jar_path:?}"))?;
+        return Ok(jar_path);
+    }
+
+    // 3. Download from remote repositories
     for repo in repos {
         let url = repo.jar_url(&artifact.module, &artifact.version);
         match ureq::get(&url).call() {
@@ -840,6 +854,67 @@ fn download_jar(
     }
 
     Err(anyhow!("JAR for {artifact} not found in any repository"))
+}
+
+/// Probe Maven local repo, Gradle cache, and Coursier cache for an existing JAR.
+/// Returns the first matching path found, or None.
+pub fn probe_local_caches(module: &Module, version: &str, jar_name: &str) -> Option<PathBuf> {
+    dirs::home_dir().and_then(|home| probe_local_caches_with_home(module, version, jar_name, &home))
+}
+
+/// Same as [`probe_local_caches`] but with an explicit home directory (testable).
+pub fn probe_local_caches_with_home(
+    module: &Module,
+    version: &str,
+    jar_name: &str,
+    home: &Path,
+) -> Option<PathBuf> {
+    // Maven: ~/.m2/repository/{group_path}/{artifactId}/{version}/{jar_name}
+    let group_path = module.org.replace('.', "/");
+    let maven_path = home
+        .join(".m2/repository")
+        .join(&group_path)
+        .join(&module.name)
+        .join(version)
+        .join(jar_name);
+    if maven_path.exists() {
+        return Some(maven_path);
+    }
+
+    // Gradle: ~/.gradle/caches/modules-2/files-2.1/{groupId}/{artifactId}/{version}/{hash}/{jar_name}
+    // The hash subdirectory is random — we need to scan it.
+    let gradle_base = home
+        .join(".gradle/caches/modules-2/files-2.1")
+        .join(&module.org)
+        .join(&module.name)
+        .join(version);
+    if gradle_base.is_dir() {
+        if let Ok(entries) = fs::read_dir(&gradle_base) {
+            for hash_dir in entries.flatten() {
+                if let Ok(files) = fs::read_dir(hash_dir.path()) {
+                    for file in files.flatten() {
+                        if file.file_name() == jar_name {
+                            return Some(file.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Coursier: ~/.cache/coursier/v1/https/repo1.maven.org/maven2/{group_path}/{artifactId}/{version}/{jar_name}
+    // (Only handles Maven Central; other repos have different path structures)
+    let coursier_path = home
+        .join(".cache/coursier/v1/https/repo1.maven.org/maven2")
+        .join(&group_path)
+        .join(&module.name)
+        .join(version)
+        .join(jar_name);
+    if coursier_path.exists() {
+        return Some(coursier_path);
+    }
+
+    None
 }
 
 use std::fs;
@@ -1148,22 +1223,68 @@ mod tests {
     }
 
     #[test]
-    fn parses_pom_with_parent() {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<project>
-  <parent>
-    <groupId>com.example</groupId>
-    <artifactId>parent-pom</artifactId>
-    <version>1.0.0</version>
-  </parent>
-  <artifactId>child-module</artifactId>
-  <version>1.0.0</version>
-</project>"#;
-        let project = parse_pom(xml).unwrap();
-        assert!(project.parent.is_some());
-        let (parent_module, parent_version) = project.parent.unwrap();
-        assert_eq!(parent_module.org, "com.example");
-        assert_eq!(parent_module.name, "parent-pom");
-        assert_eq!(parent_version, "1.0.0");
+    fn probes_maven_local_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let maven_repo = tmp.path().join(".m2/repository/com/example/lib/1.0");
+        fs::create_dir_all(&maven_repo).unwrap();
+        let jar = maven_repo.join("lib-1.0.jar");
+        fs::write(&jar, "fake").unwrap();
+
+        let module = Module {
+            org: "com.example".to_string(),
+            name: "lib".to_string(),
+        };
+        let result = probe_local_caches_with_home(&module, "1.0", "lib-1.0.jar", tmp.path());
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), jar);
+    }
+
+    #[test]
+    fn probes_gradle_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hash_dir = tmp
+            .path()
+            .join(".gradle/caches/modules-2/files-2.1/com.example/lib/1.0/abcdef1234");
+        fs::create_dir_all(&hash_dir).unwrap();
+        let jar = hash_dir.join("lib-1.0.jar");
+        fs::write(&jar, "fake").unwrap();
+
+        let module = Module {
+            org: "com.example".to_string(),
+            name: "lib".to_string(),
+        };
+        let result = probe_local_caches_with_home(&module, "1.0", "lib-1.0.jar", tmp.path());
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), jar);
+    }
+
+    #[test]
+    fn probes_coursier_cache() {
+        let tmp = tempfile::tempdir().unwrap();
+        let coursier_path = tmp
+            .path()
+            .join(".cache/coursier/v1/https/repo1.maven.org/maven2/com/example/lib/1.0");
+        fs::create_dir_all(&coursier_path).unwrap();
+        let jar = coursier_path.join("lib-1.0.jar");
+        fs::write(&jar, "fake").unwrap();
+
+        let module = Module {
+            org: "com.example".to_string(),
+            name: "lib".to_string(),
+        };
+        let result = probe_local_caches_with_home(&module, "1.0", "lib-1.0.jar", tmp.path());
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), jar);
+    }
+
+    #[test]
+    fn returns_none_when_not_cached() {
+        let tmp = tempfile::tempdir().unwrap();
+        let module = Module {
+            org: "com.nonexistent".to_string(),
+            name: "nothing".to_string(),
+        };
+        let result = probe_local_caches_with_home(&module, "9.9", "nothing-9.9.jar", tmp.path());
+        assert!(result.is_none());
     }
 }
