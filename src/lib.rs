@@ -1,9 +1,13 @@
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use zip::write::SimpleFileOptions;
 
 pub mod jdk;
 pub mod resolver;
@@ -1121,6 +1125,262 @@ fn join_classpath(paths: &[PathBuf]) -> String {
         .map(|p| p.to_string_lossy())
         .collect::<Vec<_>>()
         .join(sep)
+}
+
+// ── Export local / portable JARs ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportKind {
+    Local,
+    Portable,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportOptions {
+    pub script: PathBuf,
+    pub output: Option<PathBuf>,
+    pub force: bool,
+    pub kind: ExportKind,
+    pub extra_deps: Vec<String>,
+    pub extra_repos: Vec<String>,
+    pub extra_sources: Vec<String>,
+    pub extra_files: Vec<String>,
+    pub classpath: Vec<PathBuf>,
+    pub javac_options: Vec<String>,
+    pub runtime_options: Vec<String>,
+    pub java_agents: Vec<KeyValue>,
+    pub java_version: Option<String>,
+    pub main_class: Option<String>,
+    pub cache_dir: Option<PathBuf>,
+    pub trust_remote: bool,
+}
+
+pub fn export_jar(options: ExportOptions) -> Result<PathBuf> {
+    let output_path = export_output_path(&options.script, options.output)?;
+    if output_path.exists() && !options.force {
+        return Err(anyhow!(
+            "export target {} already exists; use --force to overwrite",
+            output_path.display()
+        ));
+    }
+    if let Some(parent) = output_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+
+    let build = build_java(BuildOptions {
+        script: options.script,
+        extra_deps: options.extra_deps,
+        extra_repos: options.extra_repos,
+        extra_sources: options.extra_sources,
+        extra_files: options.extra_files,
+        classpath: options.classpath,
+        javac_options: options.javac_options,
+        runtime_options: options.runtime_options,
+        java_agents: options.java_agents,
+        java_version: options.java_version,
+        main_class: options.main_class,
+        cache_dir: options.cache_dir,
+        trust_remote: options.trust_remote,
+    })?;
+    let main_class = build.main_class.ok_or_else(|| {
+        anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
+    })?;
+
+    match options.kind {
+        ExportKind::Local => write_classes_jar(
+            &build.classes_dir,
+            &output_path,
+            &main_class,
+            &manifest_classpath(&build.classpath)?,
+        )?,
+        ExportKind::Portable => {
+            let manifest_cp =
+                copy_portable_classpath(&output_path, &build.classpath, options.force)?;
+            write_classes_jar(&build.classes_dir, &output_path, &main_class, &manifest_cp)?;
+        }
+    }
+    Ok(output_path)
+}
+
+fn export_output_path(script: &Path, output: Option<PathBuf>) -> Result<PathBuf> {
+    let mut path = match output {
+        Some(path) => path,
+        None => {
+            let stem = script.file_stem().and_then(|s| s.to_str()).ok_or_else(|| {
+                anyhow!("could not infer export filename from {}", script.display())
+            })?;
+            PathBuf::from(stem)
+        }
+    };
+    if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+        path.set_extension("jar");
+    }
+    Ok(path)
+}
+
+fn manifest_classpath(paths: &[PathBuf]) -> Result<String> {
+    paths
+        .iter()
+        .map(|path| manifest_file_url(path))
+        .collect::<Result<Vec<_>>>()
+        .map(|entries| entries.join(" "))
+}
+
+fn manifest_file_url(path: &Path) -> Result<String> {
+    let absolute = fs::canonicalize(path)
+        .with_context(|| format!("failed to resolve classpath entry {}", path.display()))?;
+    let mut text = absolute.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) && text.len() >= 2 && text.as_bytes()[1] == b':' {
+        text.insert(0, '/');
+    }
+    Ok(format!("file://{}", percent_encode_manifest_path(&text)))
+}
+
+fn percent_encode_manifest_path(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn percent_encode_manifest_segment(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn copy_portable_classpath(
+    output_path: &Path,
+    classpath: &[PathBuf],
+    force: bool,
+) -> Result<String> {
+    if classpath.is_empty() {
+        return Ok(String::new());
+    }
+    let lib_dir = output_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("lib");
+    fs::create_dir_all(&lib_dir)?;
+    let mut seen_names = HashSet::new();
+    let mut manifest_entries = Vec::new();
+    for entry in classpath {
+        if !entry.is_file() {
+            return Err(anyhow!(
+                "portable export only supports file classpath entries for now: {}",
+                entry.display()
+            ));
+        }
+        let file_name = entry
+            .file_name()
+            .ok_or_else(|| anyhow!("invalid classpath entry: {}", entry.display()))?;
+        let manifest_name = percent_encode_manifest_segment(&file_name.to_string_lossy());
+        if !seen_names.insert(manifest_name.clone()) {
+            return Err(anyhow!(
+                "portable export has duplicate dependency filename {}; use unique filenames before exporting",
+                file_name.to_string_lossy()
+            ));
+        }
+        let target = lib_dir.join(file_name);
+        if target.exists() && !force {
+            return Err(anyhow!(
+                "portable dependency {} already exists; use --force to overwrite",
+                target.display()
+            ));
+        }
+        fs::copy(entry, &target).with_context(|| {
+            format!(
+                "failed to copy portable dependency {} to {}",
+                entry.display(),
+                target.display()
+            )
+        })?;
+        manifest_entries.push(format!("lib/{manifest_name}"));
+    }
+    Ok(manifest_entries.join(" "))
+}
+
+fn write_classes_jar(
+    classes_dir: &Path,
+    output_path: &Path,
+    main_class: &str,
+    manifest_classpath: &str,
+) -> Result<()> {
+    let file = File::create(output_path)
+        .with_context(|| format!("failed to create {}", output_path.display()))?;
+    let mut jar = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    jar.start_file("META-INF/MANIFEST.MF", options)?;
+    jar.write_all(render_manifest(main_class, manifest_classpath).as_bytes())?;
+
+    for entry in walkdir::WalkDir::new(classes_dir) {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(classes_dir)?;
+        let jar_path = rel.to_string_lossy().replace('\\', "/");
+        jar.start_file(jar_path, options)?;
+        let mut input = File::open(entry.path())?;
+        let mut buffer = Vec::new();
+        input.read_to_end(&mut buffer)?;
+        jar.write_all(&buffer)?;
+    }
+    jar.finish()?;
+    Ok(())
+}
+
+fn render_manifest(main_class: &str, classpath: &str) -> String {
+    let mut manifest = String::new();
+    manifest.push_str(&fold_manifest_line("Manifest-Version: 1.0"));
+    manifest.push_str(&fold_manifest_line(&format!("Main-Class: {main_class}")));
+    if !classpath.is_empty() {
+        manifest.push_str(&fold_manifest_line(&format!("Class-Path: {classpath}")));
+    }
+    manifest.push('\n');
+    manifest
+}
+
+fn fold_manifest_line(line: &str) -> String {
+    const MAX_BYTES: usize = 72;
+    let mut out = String::new();
+    let mut current = String::new();
+    let mut first = true;
+    for ch in line.chars() {
+        let limit = if first { MAX_BYTES } else { MAX_BYTES - 1 };
+        if !current.is_empty() && current.len() + ch.len_utf8() > limit {
+            if !first {
+                out.push(' ');
+            }
+            out.push_str(&current);
+            out.push('\n');
+            current.clear();
+            first = false;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        if !first {
+            out.push(' ');
+        }
+        out.push_str(&current);
+        out.push('\n');
+    }
+    out
 }
 
 // ── App install / uninstall / list ──────────────────────────────────────

@@ -21,6 +21,8 @@ Implemented now:
 - `juv app list` list installed script commands
 - `juv alias list [--json]` list aliases from the nearest `jbang-catalog.json`
 - `juv run <alias>` / `juv <alias>` run local catalog aliases
+- `juv export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
+- `juv export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `juv info classpath <script.java>`
 - `juv info tools <script.java>` with `--select`
 - `juv info docs <script.java>`
@@ -68,6 +70,8 @@ Implemented now:
 - `juv info cache` prints the effective cache directory
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
 - local catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `base-ref`, `script-ref`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
+- `juv export local` creates runnable JARs whose manifest classpath points at local dependency paths
+- `juv export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
@@ -85,7 +89,7 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalog import/add/remove, templates beyond the default, export, edit integration, native image, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalog import/add/remove, templates beyond the default, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

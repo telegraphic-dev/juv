@@ -7,9 +7,9 @@ use std::{
 
 use juv::{
     app_bin_dir, app_install, app_list, app_uninstall, build_java, cache_entries, catalog_aliases,
-    clear_cache, default_cache_dir, init_script, resolve_catalog_alias, run_java,
+    clear_cache, default_cache_dir, export_jar, init_script, resolve_catalog_alias, run_java,
     split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AppInstallOptions,
-    BuildOptions, InitOptions, KeyValue, RunOptions,
+    BuildOptions, ExportKind, ExportOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -44,6 +44,8 @@ enum Commands {
     App(AppCommand),
     /// Manage aliases from jbang-catalog.json.
     Alias(AliasCommand),
+    /// Export runnable JARs.
+    Export(ExportCommand),
     /// Resolve Maven dependencies without running.
     Resolve(ResolveCommand),
     /// Fetch Maven dependency artifacts and print classpath.
@@ -339,6 +341,90 @@ struct AliasListCommand {
     /// Print JSON instead of tab-separated text.
     #[arg(long = "json")]
     json: bool,
+}
+
+#[derive(Parser, Debug)]
+struct ExportCommand {
+    #[command(subcommand)]
+    command: ExportSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ExportSubcommand {
+    /// Export a runnable JAR with manifest classpath entries pointing at local paths.
+    Local(ExportJarCommand),
+    /// Export a runnable JAR plus lib/ dependencies for portable use.
+    Portable(ExportJarCommand),
+}
+
+#[derive(Parser, Debug)]
+struct ExportJarCommand {
+    /// Output JAR path (defaults to <script>.jar).
+    #[arg(long = "output", short = 'o')]
+    output: Option<PathBuf>,
+
+    /// Force overwrite of existing output files.
+    #[arg(long = "force")]
+    force: bool,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
+
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
+    javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
+
+    /// Override //MAIN / inferred class name.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Trust this remote script content hash before exporting.
+    #[arg(long = "trust")]
+    trust: bool,
+
+    /// Java source file or catalog alias to export.
+    script: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -661,6 +747,27 @@ fn split_cli_key_values(values: &[String]) -> Vec<KeyValue> {
         .collect()
 }
 
+fn export_options(cmd: ExportJarCommand, kind: ExportKind) -> ExportOptions {
+    ExportOptions {
+        script: cmd.script,
+        output: cmd.output,
+        force: cmd.force,
+        kind,
+        extra_deps: split_cli_words(&cmd.deps),
+        extra_repos: split_cli_words(&cmd.repos),
+        extra_sources: split_cli_words(&cmd.sources),
+        extra_files: split_cli_words(&cmd.files),
+        classpath: cmd.classpath,
+        javac_options: cmd.javac_options,
+        runtime_options: cmd.runtime_options,
+        java_agents: split_cli_key_values(&cmd.java_agents),
+        java_version: cmd.java_version,
+        main_class: cmd.main_class,
+        cache_dir: cmd.cache_dir,
+        trust_remote: cmd.trust,
+    }
+}
+
 fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
     let Some(value) = value else {
         anyhow::bail!("{missing}");
@@ -705,6 +812,26 @@ fn apply_alias_to_run(mut options: RunOptions) -> Result<RunOptions> {
 }
 
 fn apply_alias_to_build(mut options: BuildOptions) -> Result<BuildOptions> {
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
+    }
+    Ok(options)
+}
+
+fn apply_alias_to_export(mut options: ExportOptions) -> Result<ExportOptions> {
     if let Some(alias) = alias_for_script(&options.script)? {
         merge_alias_common(
             &alias,
@@ -1155,6 +1282,24 @@ fn main() -> Result<()> {
         Some(Commands::Alias(cmd)) => match cmd.command {
             AliasSubcommand::List(cmd) => {
                 print_aliases(cmd.json)?;
+                0
+            }
+        },
+        Some(Commands::Export(cmd)) => match cmd.command {
+            ExportSubcommand::Local(cmd) => {
+                let output = export_jar(apply_alias_to_export(export_options(
+                    cmd,
+                    ExportKind::Local,
+                ))?)?;
+                println!("Exported to {}", output.display());
+                0
+            }
+            ExportSubcommand::Portable(cmd) => {
+                let output = export_jar(apply_alias_to_export(export_options(
+                    cmd,
+                    ExportKind::Portable,
+                ))?)?;
+                println!("Exported to {}", output.display());
                 0
             }
         },
