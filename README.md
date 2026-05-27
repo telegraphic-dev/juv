@@ -28,6 +28,7 @@ Implemented now:
 - `juv run <alias>` / `juv <alias>` run local catalog aliases
 - `juv export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `juv export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
+- `juv export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
 - `juv info classpath <script.java>`
 - `juv info tools <script.java>` with `--select`
 - `juv info docs <script.java>`
@@ -79,6 +80,7 @@ Implemented now:
 - imported catalog templates with `file-refs` and default `properties`, usable via `juv init --template <name>`
 - `juv export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `juv export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
+- `juv export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
@@ -96,7 +98,7 @@ Implemented now:
 - caches discovered JDKs under `~/.cache/juv/jdks/<major>` via symlinks so future runs do not rescan everything
 - auto-provisions missing JDKs from Adoptium/Eclipse Temurin with SHA-256 archive verification
 
-Not yet implemented: catalog remove for nested catalogs, multi-file template expansion, template property CLI overrides, export mavenrepo/native/jlink/project variants, edit integration, native image, and the rest of JBang's lovely edge-case museum.
+Not yet implemented: catalog remove for nested catalogs, multi-file template expansion, template property CLI overrides, export mavenrepo/jlink/project variants, edit integration, and the rest of JBang's lovely edge-case museum.
 
 ## Example
 

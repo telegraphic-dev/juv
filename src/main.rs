@@ -8,10 +8,10 @@ use std::{
 use juv::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
     cache_entries, catalog_add, catalog_aliases, catalog_refs, catalog_templates, clear_cache,
-    default_cache_dir, export_jar, init_script, resolve_catalog_alias, run_java,
+    default_cache_dir, export_jar, export_native, init_script, resolve_catalog_alias, run_java,
     split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AliasAddOptions,
     AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions, ExportKind,
-    ExportOptions, InitOptions, KeyValue, RunOptions,
+    ExportOptions, InitOptions, KeyValue, NativeExportOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -526,6 +526,8 @@ enum ExportSubcommand {
     Local(ExportJarCommand),
     /// Export a runnable JAR plus lib/ dependencies for portable use.
     Portable(ExportJarCommand),
+    /// Export a native executable using GraalVM native-image.
+    Native(ExportNativeCommand),
 }
 
 #[derive(Parser, Debug)]
@@ -542,6 +544,87 @@ struct ExportJarCommand {
     #[arg(long = "deps")]
     deps: Vec<String>,
 
+    /// Additional repository, same shape as //REPOS.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Additional source file, same shape as //SOURCES.
+    #[arg(long = "source", alias = "sources")]
+    sources: Vec<String>,
+
+    /// Additional file/resource, same shape as //FILES.
+    #[arg(long = "files", alias = "file")]
+    files: Vec<String>,
+
+    /// Additional classpath entries.
+    #[arg(long = "class-path", alias = "cp")]
+    classpath: Vec<PathBuf>,
+
+    /// Additional javac option.
+    #[arg(
+        long = "javac-option",
+        alias = "compile-option",
+        allow_hyphen_values = true
+    )]
+    javac_options: Vec<String>,
+
+    /// Additional java runtime option, same shape as //JAVA_OPTIONS.
+    #[arg(
+        long = "runtime-option",
+        alias = "java-option",
+        allow_hyphen_values = true
+    )]
+    runtime_options: Vec<String>,
+
+    /// Override //JAVA requested version.
+    #[arg(long = "java")]
+    java_version: Option<String>,
+
+    /// Additional java agent, same shape as //JAVAAGENT.
+    #[arg(long = "javaagent")]
+    java_agents: Vec<String>,
+
+    /// Override //MAIN / inferred class name.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Trust this remote script content hash before exporting.
+    #[arg(long = "trust")]
+    trust: bool,
+
+    /// Java source file or catalog alias to export.
+    script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct ExportNativeCommand {
+    /// Output executable path (defaults to <script> with platform executable suffix).
+    #[arg(long = "output", short = 'o')]
+    output: Option<PathBuf>,
+
+    /// Force overwrite of existing output files.
+    #[arg(long = "force")]
+    force: bool,
+
+    /// Path to native-image executable (defaults to JDK bin/native-image or PATH).
+    #[arg(long = "native-image")]
+    native_image: Option<PathBuf>,
+
+    /// Additional native-image option, same shape as //NATIVE_OPTIONS.
+    #[arg(
+        long = "native-option",
+        alias = "native-options",
+        allow_hyphen_values = true
+    )]
+    native_options: Vec<String>,
+
+    /// Additional dependency coordinates, same shape as //DEPS.
+    #[arg(long = "deps")]
+    deps: Vec<String>,
     /// Additional repository, same shape as //REPOS.
     #[arg(long = "repo", alias = "repos")]
     repos: Vec<String>,
@@ -918,6 +1001,28 @@ fn split_cli_key_values(values: &[String]) -> Vec<KeyValue> {
         .collect()
 }
 
+fn native_export_options(cmd: ExportNativeCommand) -> NativeExportOptions {
+    NativeExportOptions {
+        script: cmd.script,
+        output: cmd.output,
+        force: cmd.force,
+        native_image: cmd.native_image,
+        extra_native_options: split_cli_words(&cmd.native_options),
+        extra_deps: split_cli_words(&cmd.deps),
+        extra_repos: split_cli_words(&cmd.repos),
+        extra_sources: split_cli_words(&cmd.sources),
+        extra_files: split_cli_words(&cmd.files),
+        classpath: cmd.classpath,
+        javac_options: cmd.javac_options,
+        runtime_options: cmd.runtime_options,
+        java_agents: split_cli_key_values(&cmd.java_agents),
+        java_version: cmd.java_version,
+        main_class: cmd.main_class,
+        cache_dir: cmd.cache_dir,
+        trust_remote: cmd.trust,
+    }
+}
+
 fn export_options(cmd: ExportJarCommand, kind: ExportKind) -> ExportOptions {
     ExportOptions {
         script: cmd.script,
@@ -1003,6 +1108,26 @@ fn apply_alias_to_build(mut options: BuildOptions) -> Result<BuildOptions> {
 }
 
 fn apply_alias_to_export(mut options: ExportOptions) -> Result<ExportOptions> {
+    if let Some(alias) = alias_for_script(&options.script)? {
+        merge_alias_common(
+            &alias,
+            &mut options.script,
+            &mut options.extra_deps,
+            &mut options.extra_repos,
+            &mut options.extra_sources,
+            &mut options.extra_files,
+            &mut options.classpath,
+            &mut options.javac_options,
+            &mut options.runtime_options,
+            &mut options.java_agents,
+            &mut options.java_version,
+            &mut options.main_class,
+        );
+    }
+    Ok(options)
+}
+
+fn apply_alias_to_native_export(mut options: NativeExportOptions) -> Result<NativeExportOptions> {
     if let Some(alias) = alias_for_script(&options.script)? {
         merge_alias_common(
             &alias,
@@ -1560,6 +1685,12 @@ fn main() -> Result<()> {
                     cmd,
                     ExportKind::Portable,
                 ))?)?;
+                println!("Exported to {}", output.display());
+                0
+            }
+            ExportSubcommand::Native(cmd) => {
+                let output =
+                    export_native(apply_alias_to_native_export(native_export_options(cmd))?)?;
                 println!("Exported to {}", output.display());
                 0
             }
