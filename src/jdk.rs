@@ -632,10 +632,35 @@ fn create_symlink_dir(target: &Path, link: &Path) -> anyhow::Result<()> {
     }
     #[cfg(windows)]
     {
-        // On Windows, try directory junction first, then symlink
+        // On Windows, directory symlinks may require privileges. If creating the
+        // symlink fails, copy the JDK root so the cache entry is still usable.
         if std::os::windows::fs::symlink_dir(target, link).is_err() {
-            // Fallback: copy the directory tree (expensive but works)
             copy_dir_recursive(target, link)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_dir_recursive(source: &Path, target: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(target)
+        .with_context(|| format!("failed to create directory {}", target.display()))?;
+    for entry in fs::read_dir(source)
+        .with_context(|| format!("failed to read directory {}", source.display()))?
+    {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else {
+            fs::copy(&source_path, &target_path).with_context(|| {
+                format!(
+                    "failed to copy {} to {}",
+                    source_path.display(),
+                    target_path.display()
+                )
+            })?;
         }
     }
     Ok(())
