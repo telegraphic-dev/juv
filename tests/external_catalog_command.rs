@@ -423,3 +423,64 @@ class {{className}} {
         "{source}"
     );
 }
+
+#[test]
+fn catalog_template_defaults_java_version_placeholder_to_baseline() {
+    let tmp = tempfile::tempdir().unwrap();
+    let external = tmp.path().join("external");
+    let template_dir = external.join("templates");
+    fs::create_dir_all(&template_dir).unwrap();
+    fs::write(
+        template_dir.join("Script.java"),
+        r#"///usr/bin/env jbang "$0" "$@" ; exit $?
+//JAVA {{javaVersion}}
+class {{className}} {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbang-catalog.json"),
+        format!(
+            r#"{{
+  "catalogs": {{
+    "local": {{
+      "catalog-ref": "{}",
+      "import": true
+    }}
+  }}
+}}
+"#,
+            external.join("jbang-catalog.json").display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        external.join("jbang-catalog.json"),
+        r#"{
+  "templates": {
+    "script": {
+      "description": "Executable script",
+      "file-refs": { "Script.java": "templates/Script.java" }
+    }
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("App.java")
+        .arg("--template")
+        .arg("script@local")
+        .output()
+        .unwrap();
+    assert_success(&output);
+
+    let source = fs::read_to_string(tmp.path().join("App.java")).unwrap();
+    assert!(source.contains("//JAVA 25\n"), "{source}");
+    assert!(!source.contains("javaVersion"), "{source}");
+}

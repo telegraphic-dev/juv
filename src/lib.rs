@@ -1002,9 +1002,13 @@ fn render_catalog_template(
         };
         replacements.push((key.clone(), value.clone()));
     }
-    if let Some(version) = &options.java_version {
-        replacements.push(("javaVersion".to_string(), version.clone()));
-    }
+    replacements.push((
+        "javaVersion".to_string(),
+        options
+            .java_version
+            .clone()
+            .unwrap_or_else(|| "25".to_string()),
+    ));
     for (key, value) in replacements {
         content = content.replace(&format!("{{{{{key}}}}}"), &value);
         content = content.replace(&format!("{{{key}}}"), &value);
