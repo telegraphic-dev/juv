@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub mod jdk;
 pub mod resolver;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -539,7 +540,8 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     let mut cp_entries = options.classpath;
     cp_entries.extend(dep_cp);
 
-    let javac = javac_for(&directives.java_version);
+    let jdk_root = jdk::resolve_jdk(&directives.java_version, true)?;
+    let javac = jdk::javac_bin_path(&jdk_root).display().to_string();
     let mut javac_cmd = Command::new(&javac);
     javac_cmd.arg("-d").arg(&classes_dir);
     if !cp_entries.is_empty() {
@@ -555,7 +557,10 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
             javac_cmd.arg("--enable-preview");
         }
         if !has_source_or_release_option(&directives.javac_options) {
-            javac_cmd.arg("--release").arg(javac_major_version(&javac)?);
+            let release_version = jdk::detect_jdk_major_version(&jdk_root).with_context(|| {
+                format!("could not determine JDK version at {}", jdk_root.display())
+            })?;
+            javac_cmd.arg("--release").arg(release_version.to_string());
         }
     }
     javac_cmd.args(&sources);
@@ -608,7 +613,8 @@ pub fn run_java(options: RunOptions) -> Result<i32> {
         anyhow!("could not infer main class; add //MAIN fully.qualified.ClassName")
     })?;
 
-    let java = java_for(&build.directives.java_version);
+    let jdk_root = jdk::resolve_jdk(&build.directives.java_version, true)?;
+    let java = jdk::java_bin_path(&jdk_root).display().to_string();
     let mut runtime_cp = vec![build.classes_dir];
     runtime_cp.extend(build.classpath);
     let mut java_cmd = Command::new(&java);
@@ -695,14 +701,6 @@ fn resolve_dependencies(
     Ok(paths)
 }
 
-fn javac_for(java_version: &Option<String>) -> String {
-    versioned_tool("javac", java_version)
-}
-
-fn java_for(java_version: &Option<String>) -> String {
-    versioned_tool("java", java_version)
-}
-
 fn has_source_or_release_option(options: &[String]) -> bool {
     options.iter().any(|option| {
         matches!(
@@ -712,47 +710,6 @@ fn has_source_or_release_option(options: &[String]) -> bool {
             || option.starts_with("--source=")
             || option.starts_with("-source")
     })
-}
-
-fn javac_major_version(javac: &str) -> Result<String> {
-    let output = Command::new(javac)
-        .arg("-version")
-        .output()
-        .with_context(|| format!("failed to execute {javac} -version"))?;
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let version_re = Regex::new(r"javac\s+(?:1\.)?(\d+)").expect("valid javac version regex");
-    version_re
-        .captures(&text)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
-        .ok_or_else(|| anyhow!("could not determine javac version from: {text}"))
-}
-
-fn versioned_tool(tool: &str, java_version: &Option<String>) -> String {
-    if let Some(version) = java_version {
-        let sdkman = PathBuf::from(format!(
-            "{}/.sdkman/candidates/java/current/bin/{tool}",
-            std::env::var("HOME").unwrap_or_default()
-        ));
-        if sdkman.exists() {
-            return sdkman.display().to_string();
-        }
-        let common = [
-            format!("/usr/lib/jvm/java-{version}-openjdk/bin/{tool}"),
-            format!("/usr/lib/jvm/java-{version}-openjdk-amd64/bin/{tool}"),
-            format!("/usr/lib/jvm/java-{version}-openjdk-arm64/bin/{tool}"),
-        ];
-        for candidate in common {
-            if Path::new(&candidate).exists() {
-                return candidate;
-            }
-        }
-    }
-    tool.to_string()
 }
 
 fn copy_declared_files(base_dir: &Path, classes_dir: &Path, files: &[String]) -> Result<()> {
