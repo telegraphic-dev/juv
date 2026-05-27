@@ -36,7 +36,7 @@ pub fn find_jdk(major_version: u32, auto_install: bool) -> anyhow::Result<PathBu
     let cached = jdk_dir.join(major_version.to_string());
     if looks_like_jdk_root(&cached) {
         return Ok(cached);
-    } else if cached.exists() {
+    } else if cached.exists() || cached.is_symlink() {
         let _ = remove_stale_cache_entry(&cached);
     }
 
@@ -635,6 +635,11 @@ fn create_symlink_dir(target: &Path, link: &Path) -> anyhow::Result<()> {
     if link.exists() {
         return Ok(());
     }
+    // Remove a broken symlink so the cache entry can be replaced.
+    if link.is_symlink() {
+        fs::remove_file(link)
+            .with_context(|| format!("failed to remove broken symlink {}", link.display()))?;
+    }
     // Ensure parent exists
     if let Some(parent) = link.parent() {
         fs::create_dir_all(parent)?;
@@ -737,6 +742,28 @@ mod tests {
         fs::write(home.join("release"), "JAVA_VERSION=\"25\"\n").unwrap();
 
         assert_eq!(find_extracted_jdk_root(tmp.path(), "mac"), home);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_create_symlink_dir_replaces_broken_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("jdk-25");
+        fs::create_dir_all(target.join("bin")).unwrap();
+        fs::write(java_bin_path(&target), "").unwrap();
+        fs::write(javac_bin_path(&target), "").unwrap();
+        fs::write(target.join("release"), "JAVA_VERSION=\"25\"\n").unwrap();
+
+        let link = tmp.path().join("cache").join("25");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("missing-jdk"), &link).unwrap();
+        assert!(link.is_symlink());
+        assert!(!link.exists());
+
+        create_symlink_dir(&target, &link).unwrap();
+
+        assert!(link.exists());
+        assert!(looks_like_jdk_root(&link));
     }
 
     #[test]
