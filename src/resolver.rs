@@ -25,6 +25,12 @@ impl fmt::Display for Module {
     }
 }
 
+/// Sanitize a string for safe use as a filesystem path segment.
+/// Replaces path separators and `..` to prevent directory traversal.
+fn sanitize_path_segment(s: &str) -> String {
+    s.replace("..", "_dotdot_").replace(['/', '\\', '\0'], "_")
+}
+
 /// Maven dependency scope.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Scope {
@@ -302,7 +308,8 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
         let mut result = s.to_string();
         // Repeat until stable to handle chained properties
         // (e.g. ${jackson.version} → ${jackson.core.version} → 2.17.0)
-        loop {
+        // Cap iterations to prevent infinite loops from circular refs
+        for _ in 0..10 {
             let mut changed = false;
             for (key, value) in props {
                 let pattern = format!("${{{key}}}");
@@ -639,14 +646,21 @@ pub fn resolve_classpath(
 
     let mut paths: Vec<PathBuf> = Vec::new();
     for artifact in &artifacts {
-        let group_path = artifact.module.org.replace('.', "/");
+        let group_path = sanitize_path_segment(&artifact.module.org).replace('.', "/");
+        let artifact_name = sanitize_path_segment(&artifact.module.name);
+        let version = sanitize_path_segment(&artifact.version);
         let jar_name = match &artifact.classifier {
-            Some(c) => format!("{}-{}-{}.jar", artifact.module.name, artifact.version, c),
-            None => format!("{}-{}.jar", artifact.module.name, artifact.version),
+            Some(c) => format!(
+                "{}-{}-{}.jar",
+                artifact_name,
+                version,
+                sanitize_path_segment(c)
+            ),
+            None => format!("{}-{}.jar", artifact_name, version),
         };
         let jar_path = cache_dir
             .join(&group_path)
-            .join(&artifact.module.name)
+            .join(&artifact_name)
             .join(&jar_name);
         if jar_path.exists() {
             paths.push(jar_path);
@@ -892,7 +906,8 @@ fn resolve_parent_chain_inner(
     let substitute = |s: &str, props: &HashMap<String, String>| -> String {
         let mut result = s.to_string();
         // Repeat until stable to handle chained properties
-        loop {
+        // Cap iterations to prevent infinite loops from circular refs
+        for _ in 0..10 {
             let mut changed = false;
             for (key, value) in props {
                 let pattern = format!("${{{key}}}");
@@ -1025,14 +1040,22 @@ fn download_jar(
 ) -> Result<PathBuf> {
     // Use groupId path segments to avoid collisions between artifacts
     // with the same artifactId+version from different groups.
-    let group_path = artifact.module.org.replace('.', "/");
+    // Sanitize all coordinate-derived path segments to prevent traversal.
+    let group_path = sanitize_path_segment(&artifact.module.org).replace('.', "/");
+    let artifact_name = sanitize_path_segment(&artifact.module.name);
+    let version = sanitize_path_segment(&artifact.version);
     let jar_name = match &artifact.classifier {
-        Some(c) => format!("{}-{}-{}.jar", artifact.module.name, artifact.version, c),
-        None => format!("{}-{}.jar", artifact.module.name, artifact.version),
+        Some(c) => format!(
+            "{}-{}-{}.jar",
+            artifact_name,
+            version,
+            sanitize_path_segment(c)
+        ),
+        None => format!("{}-{}.jar", artifact_name, version),
     };
     let jar_path = cache_dir
         .join(&group_path)
-        .join(&artifact.module.name)
+        .join(&artifact_name)
         .join(&jar_name);
 
     // 1. Check juv's own cache
@@ -1404,6 +1427,14 @@ mod tests {
 </project>"#;
         let project = parse_pom(xml).unwrap();
         assert_eq!(project.dependencies[0].version, "2.17.0");
+    }
+
+    #[test]
+    fn sanitize_path_segment_blocks_traversal() {
+        assert_eq!(sanitize_path_segment("../../etc"), "_dotdot___dotdot__etc");
+        assert_eq!(sanitize_path_segment("foo/bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("foo\\bar"), "foo_bar");
+        assert_eq!(sanitize_path_segment("normal"), "normal");
     }
 
     #[test]

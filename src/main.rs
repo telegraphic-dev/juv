@@ -974,6 +974,9 @@ fn main() -> Result<()> {
             };
             let mut repos = vec![juv::resolver::Repository::central()];
             for repo in &cmd.repos {
+                if repo == "central" || repo == "mavenCentral" {
+                    continue; // already included
+                }
                 if let Some((id, url)) = repo.split_once('=') {
                     repos.push(juv::resolver::Repository {
                         id: id.to_string(),
@@ -1004,6 +1007,9 @@ fn main() -> Result<()> {
             };
             let mut repos = vec![juv::resolver::Repository::central()];
             for repo in &cmd.repos {
+                if repo == "central" || repo == "mavenCentral" {
+                    continue; // already included
+                }
                 if let Some((id, url)) = repo.split_once('=') {
                     repos.push(juv::resolver::Repository {
                         id: id.to_string(),
