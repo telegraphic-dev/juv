@@ -360,3 +360,66 @@ fn self_imported_catalog_with_relative_dot_path_does_not_recurse_forever() {
         "{stdout}"
     );
 }
+
+#[test]
+fn catalog_template_deps_preserve_shebang_and_java_directive_order() {
+    let tmp = tempfile::tempdir().unwrap();
+    let template_dir = tmp.path().join("templates");
+    fs::create_dir(&template_dir).unwrap();
+    fs::write(
+        template_dir.join("Script.java"),
+        r#"///usr/bin/env jbang "$0" "$@" ; exit $?
+//JAVA {{javaVersion}}
+class {{className}} {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbang-catalog.json"),
+        r#"{
+  "templates": {
+    "script": {
+      "description": "Executable script",
+      "file-refs": { "Script.java": "templates/Script.java" }
+    }
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    assert_success(
+        &juv_command()
+            .current_dir(tmp.path())
+            .arg("catalog")
+            .arg("add")
+            .arg("local")
+            .arg("jbang-catalog.json")
+            .output()
+            .unwrap(),
+    );
+
+    let output = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("App.java")
+        .arg("--template")
+        .arg("script@local")
+        .arg("--java")
+        .arg("25")
+        .arg("--deps")
+        .arg("info.picocli:picocli:4.7.7")
+        .output()
+        .unwrap();
+    assert_success(&output);
+
+    let source = fs::read_to_string(tmp.path().join("App.java")).unwrap();
+    assert!(
+        source.starts_with(
+            "///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n//JAVA 25\n//DEPS info.picocli:picocli:4.7.7\n"
+        ),
+        "{source}"
+    );
+}

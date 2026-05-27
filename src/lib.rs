@@ -1010,13 +1010,41 @@ fn render_catalog_template(
         content = content.replace(&format!("{{{key}}}"), &value);
     }
     if !options.deps.is_empty() {
-        let mut header = String::new();
-        for dep in &options.deps {
-            header.push_str(&format!("//DEPS {dep}\n"));
-        }
-        content = format!("{header}{content}");
+        content = insert_template_deps(&content, &options.deps);
     }
     Ok(content)
+}
+
+fn insert_template_deps(content: &str, deps: &[String]) -> String {
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let mut insert_at = 0;
+    if lines
+        .first()
+        .is_some_and(|line| line.starts_with("///usr/bin/env ") || line.starts_with("#!"))
+    {
+        insert_at = 1;
+    }
+    while lines
+        .get(insert_at)
+        .is_some_and(|line| line.starts_with("//JAVA "))
+    {
+        insert_at += 1;
+    }
+
+    let mut out = String::new();
+    for line in &lines[..insert_at] {
+        out.push_str(line);
+    }
+    for dep in deps {
+        out.push_str(&format!("//DEPS {dep}\n"));
+    }
+    for line in &lines[insert_at..] {
+        out.push_str(line);
+    }
+    if lines.is_empty() {
+        out.push_str(content);
+    }
+    out
 }
 
 fn render_header(options: &InitOptions, default_java: Option<&str>, out: &mut String) {
