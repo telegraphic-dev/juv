@@ -306,14 +306,20 @@ pub fn detect_jdk_major_version(jdk_root: &Path) -> Option<u32> {
 
 /// Parse the major version from a version string like "21.0.3", "1.8.0_432", "17.0.11+10".
 fn parse_major_from_version_string(version: &str) -> Option<u32> {
-    static RE: OnceLock<regex::Regex> = OnceLock::new();
-    // Handle "1.8.x" format (Java 8)
-    let re = RE.get_or_init(|| regex::Regex::new(r"(?:1\.)?(\d+)").expect("valid regex"));
-    if let Some(caps) = re.captures(version) {
-        caps.get(1).and_then(|m| m.as_str().parse().ok())
-    } else {
-        None
+    static LEGACY_RE: OnceLock<regex::Regex> = OnceLock::new();
+    static MODERN_RE: OnceLock<regex::Regex> = OnceLock::new();
+
+    // Java 8 reports as "1.8.x"; modern Java reports as "17.x", "25", etc.
+    if version.starts_with("1.") {
+        let re = LEGACY_RE.get_or_init(|| regex::Regex::new(r"^1\.(\d+)").expect("valid regex"));
+        return re
+            .captures(version)
+            .and_then(|caps| caps.get(1).and_then(|m| m.as_str().parse().ok()));
     }
+
+    let re = MODERN_RE.get_or_init(|| regex::Regex::new(r"(\d+)").expect("valid regex"));
+    re.captures(version)
+        .and_then(|caps| caps.get(1).and_then(|m| m.as_str().parse().ok()))
 }
 
 /// Probe a JDK root directory — returns (major_version, root) if valid.

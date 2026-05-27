@@ -7,6 +7,10 @@ fn juv_command() -> Command {
 
 fn run_juv(args: &[&std::path::Path], text_args: &[&str]) -> Output {
     let mut cmd = juv_command();
+    // GitHub Actions can run several Java processes at once and occasionally
+    // emits hsperfdata lock warnings into stdout. Disable shared perfdata so
+    // tests assert script output, not VM housekeeping noise.
+    cmd.env("JAVA_TOOL_OPTIONS", "-XX:+PerfDisableSharedMem");
     for arg in args {
         cmd.arg(arg);
     }
