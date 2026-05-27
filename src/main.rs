@@ -1074,10 +1074,7 @@ fn main() -> Result<()> {
                     println!("No JDKs found.");
                 } else {
                     for (major, root) in &jdks {
-                        let version_detail = juv::jdk::detect_jdk_major_version(root)
-                            .map(|v| format!("{major}.x (detected {v})"))
-                            .unwrap_or_else(|| format!("{major}.x"));
-                        println!("{major}\t{}\t{}", version_detail, root.display());
+                        println!("{major}\t{major}.x\t{}", root.display());
                     }
                 }
                 0

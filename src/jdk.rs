@@ -8,8 +8,9 @@
 //! (Eclipse Temurin) API.
 
 use std::fs;
-use std::io::{self, Read};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -305,8 +306,9 @@ pub fn detect_jdk_major_version(jdk_root: &Path) -> Option<u32> {
 
 /// Parse the major version from a version string like "21.0.3", "1.8.0_432", "17.0.11+10".
 fn parse_major_from_version_string(version: &str) -> Option<u32> {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
     // Handle "1.8.x" format (Java 8)
-    let re = regex::Regex::new(r"(?:1\.)?(\d+)").ok()?;
+    let re = RE.get_or_init(|| regex::Regex::new(r"(?:1\.)?(\d+)").expect("valid regex"));
     if let Some(caps) = re.captures(version) {
         caps.get(1).and_then(|m| m.as_str().parse().ok())
     } else {
@@ -351,11 +353,32 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
     let archive_url = format!(
         "https://api.adoptium.net/v3/binary/latest/{major_version}/ga/{os}/{arch}/jdk/hotspot/normal/eclipse"
     );
+    let checksum_url = format!(
+        "https://api.adoptium.net/v3/assets/latest/{major_version}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse"
+    );
 
     eprintln!("Downloading JDK {major_version} from Adoptium...");
 
-    // Download the archive
     let agent = format!("juv/{}", env!("CARGO_PKG_VERSION"));
+    let expected_checksum = normalize_sha256(&fetch_adoptium_checksum(&checksum_url, &agent)?)?;
+
+    let archive_path = target_dir.with_extension(if os == "windows" {
+        "zip.tmp"
+    } else {
+        "tar.gz.tmp"
+    });
+    if archive_path.exists() {
+        fs::remove_file(&archive_path).with_context(|| {
+            format!(
+                "failed to remove stale JDK archive {}",
+                archive_path.display()
+            )
+        })?;
+    }
+    if let Some(parent) = archive_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
     let response = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(300))
         .timeout_write(Duration::from_secs(30))
@@ -366,28 +389,30 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
         .call()
         .with_context(|| format!("failed to download JDK {major_version} from Adoptium"))?;
 
-    // Read the full archive into memory (we need it for extraction + checksum)
-    let mut archive_data = Vec::new();
-    response
-        .into_reader()
-        .read_to_end(&mut archive_data)
-        .context("failed to read JDK archive")?;
-
-    // Fetch SHA-256 checksum for verification
-    let checksum_url = format!(
-        "https://api.adoptium.net/v3/assets/latest/{major_version}/hotspot?architecture={arch}&image_type=jdk&os={os}&vendor=eclipse"
-    );
-    let expected_checksum = fetch_adoptium_checksum(&checksum_url, &agent);
-
-    if let Some(ref expected) = expected_checksum {
-        let mut hasher = Sha256::new();
-        hasher.update(&archive_data);
-        let actual = format!("{:x}", hasher.finalize());
-        if actual != expected.replace('-', "") {
-            return Err(anyhow!(
-                "JDK archive checksum mismatch: expected {expected}, got {actual}"
-            ));
+    let mut reader = response.into_reader();
+    let mut file = fs::File::create(&archive_path)
+        .with_context(|| format!("failed to create JDK archive {}", archive_path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .context("failed to read JDK archive")?;
+        if read == 0 {
+            break;
         }
+        hasher.update(&buffer[..read]);
+        file.write_all(&buffer[..read])
+            .context("failed to write JDK archive")?;
+    }
+    file.flush().context("failed to flush JDK archive")?;
+
+    let actual_checksum = format!("{:x}", hasher.finalize());
+    if actual_checksum != expected_checksum {
+        let _ = fs::remove_file(&archive_path);
+        return Err(anyhow!(
+            "JDK archive checksum mismatch: expected {expected_checksum}, got {actual_checksum}"
+        ));
     }
 
     // Extract into a temp dir first, then move to final location
@@ -398,7 +423,7 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
     fs::create_dir_all(&tmp_dir)
         .with_context(|| format!("failed to create temp JDK dir {}", tmp_dir.display()))?;
 
-    extract_jdk_archive(&archive_data, &tmp_dir, os)?;
+    extract_jdk_archive(&archive_path, &tmp_dir, os)?;
 
     // Adoptium .tar.gz contains a single directory like jdk-25.0.3+9 — move its contents up
     let actual_root = if let Some(single_child) = find_single_subdir(&tmp_dir) {
@@ -409,7 +434,7 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
 
     // Move to final location
     if target_dir.exists() {
-        let _ = fs::remove_dir_all(&target_dir);
+        let _ = remove_stale_cache_entry(&target_dir);
     }
     fs::rename(&actual_root, &target_dir)
         .with_context(|| format!("failed to move JDK to {}", target_dir.display()))?;
@@ -418,37 +443,55 @@ fn install_from_adoptium(major_version: u32) -> anyhow::Result<PathBuf> {
     if tmp_dir != actual_root && tmp_dir.exists() {
         let _ = fs::remove_dir_all(&tmp_dir);
     }
+    let _ = fs::remove_file(&archive_path);
 
     eprintln!("JDK {major_version} installed to {}", target_dir.display());
     Ok(target_dir)
 }
 
 /// Fetch the SHA-256 checksum from the Adoptium assets API.
-fn fetch_adoptium_checksum(url: &str, agent: &str) -> Option<String> {
+fn fetch_adoptium_checksum(url: &str, agent: &str) -> anyhow::Result<String> {
     let response = ureq::AgentBuilder::new()
         .timeout_read(Duration::from_secs(30))
         .build()
         .get(url)
         .set("User-Agent", agent)
         .call()
-        .ok()?;
+        .context("failed to fetch JDK checksum metadata")?;
 
     let mut body_text = String::new();
-    response.into_reader().read_to_string(&mut body_text).ok()?;
-    let body: serde_json::Value = serde_json::from_str(&body_text).ok()?;
+    response
+        .into_reader()
+        .read_to_string(&mut body_text)
+        .context("failed to read JDK checksum metadata")?;
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text).context("failed to parse JDK checksum metadata JSON")?;
     body.get(0)
         .and_then(|v| v.get("binary"))
         .and_then(|v| v.get("package"))
         .and_then(|v| v.get("checksum"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("JDK checksum metadata did not contain binary.package.checksum"))
+}
+
+fn normalize_sha256(checksum: &str) -> anyhow::Result<String> {
+    let normalized = checksum.trim().replace('-', "").to_ascii_lowercase();
+    if normalized.len() != 64 || !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(anyhow!(
+            "invalid SHA-256 checksum from Adoptium: {checksum}"
+        ));
+    }
+    Ok(normalized)
 }
 
 /// Extract a JDK archive (.tar.gz on Linux/macOS, .zip on Windows) into target_dir.
-fn extract_jdk_archive(data: &[u8], target_dir: &Path, os: &str) -> anyhow::Result<()> {
+fn extract_jdk_archive(archive_path: &Path, target_dir: &Path, os: &str) -> anyhow::Result<()> {
     if os == "windows" {
         // .zip extraction
-        let cursor = io::Cursor::new(data);
+        let cursor = fs::File::open(archive_path).with_context(|| {
+            format!("failed to open JDK zip archive {}", archive_path.display())
+        })?;
         let mut archive =
             zip::ZipArchive::new(cursor).with_context(|| "failed to read JDK zip archive")?;
         archive
@@ -456,7 +499,12 @@ fn extract_jdk_archive(data: &[u8], target_dir: &Path, os: &str) -> anyhow::Resu
             .with_context(|| "failed to extract JDK zip archive")?;
     } else {
         // .tar.gz extraction
-        let cursor = io::Cursor::new(data);
+        let cursor = fs::File::open(archive_path).with_context(|| {
+            format!(
+                "failed to open JDK tar.gz archive {}",
+                archive_path.display()
+            )
+        })?;
         let gz_decoder = GzDecoder::new(cursor);
         let mut archive = tar::Archive::new(gz_decoder);
         archive
@@ -510,9 +558,9 @@ fn detect_platform() -> anyhow::Result<(&'static str, &'static str)> {
         "arm"
     } else if cfg!(target_arch = "riscv64") {
         "riscv64"
-    } else if cfg!(target_pointer_width = "32") && cfg!(target_arch = "powerpc") {
+    } else if cfg!(target_arch = "powerpc64") && !cfg!(target_endian = "little") {
         "ppc64"
-    } else if cfg!(target_pointer_width = "64") && cfg!(target_arch = "powerpc64") {
+    } else if cfg!(target_arch = "powerpc64") && cfg!(target_endian = "little") {
         "ppc64le"
     } else if cfg!(target_arch = "s390x") {
         "s390x"

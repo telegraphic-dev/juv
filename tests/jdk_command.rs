@@ -85,8 +85,18 @@ fn jdk_symlink_cache_avoids_re_search() {
         std::fs::canonicalize(&link).unwrap_or_else(|_| link.clone())
     };
     assert!(
-        resolved.to_string_lossy().contains("jvm") || resolved.to_string_lossy().contains("jdks"),
-        "symlink target should be a real JDK root, got: {}",
+        resolved.join("bin").join("java").is_file(),
+        "symlink target should have bin/java, got: {}",
+        resolved.display()
+    );
+    assert!(
+        resolved.join("bin").join("javac").is_file(),
+        "symlink target should have bin/javac, got: {}",
+        resolved.display()
+    );
+    assert!(
+        resolved.join("release").is_file(),
+        "symlink target should have a release file, got: {}",
         resolved.display()
     );
 }
