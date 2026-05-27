@@ -171,6 +171,7 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
     }
 
     let template = init_template(options.template.as_deref())?;
+    validate_init_java_version(template, options.java_version.as_deref())?;
     let base_name = options
         .script
         .file_stem()
@@ -233,6 +234,20 @@ pub const INIT_TEMPLATES: &[InitTemplate] = &[
 
 pub fn init_templates() -> &'static [InitTemplate] {
     INIT_TEMPLATES
+}
+
+fn validate_init_java_version(template: InitTemplate, version: Option<&str>) -> Result<()> {
+    let Some(version) = version else {
+        return Ok(());
+    };
+    let major = jdk::parse_java_version_directive(version)?;
+    if matches!(template.name, "hello" | "java" | "compact") && major < 25 {
+        return Err(anyhow!(
+            "template '{}' uses Java 25 unnamed classes; use --java 25+ or choose a class-based template",
+            template.name
+        ));
+    }
+    Ok(())
 }
 
 fn init_template(template: Option<&str>) -> Result<InitTemplate> {

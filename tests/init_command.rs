@@ -59,6 +59,46 @@ fn init_writes_deps_and_java_directives() {
 }
 
 #[test]
+fn init_rejects_lower_java_for_unnamed_class_templates() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("--java")
+        .arg("17")
+        .arg("Old.java")
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("uses Java 25 unnamed classes"), "{stderr}");
+}
+
+#[test]
+fn init_allows_lower_java_for_class_based_templates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("Greet.java");
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("--template")
+        .arg("cli")
+        .arg("--java")
+        .arg("17")
+        .arg("Greet.java")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let content = fs::read_to_string(&script).unwrap();
+    assert!(content.contains("//JAVA 17"));
+    assert!(content.contains("class Greet implements Callable<Integer>"));
+}
+
+#[test]
 fn init_refuses_to_overwrite_without_force() {
     let tmp = tempfile::tempdir().unwrap();
     let script = tmp.path().join("Existing.java");
