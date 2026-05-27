@@ -16,6 +16,9 @@ Implemented now:
 - `doj cache list [--json] [--cache-dir ...]`
 - `doj trust add|remove|list|clear` for remote script trust entries
 - `doj run --trust <http(s)://.../script.java>` / `doj build --trust <http(s)://.../script.java>`
+- `doj app install <script.java>` install a script as a PATH command
+- `doj app uninstall <name>` remove an installed command
+- `doj app list` list installed script commands
 - `doj info classpath <script.java>`
 - `doj info tools <script.java>` with `--select`
 - `doj info docs <script.java>`
