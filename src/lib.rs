@@ -155,6 +155,36 @@ pub struct AliasRemoveOptions {
     pub global: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogRefEntry {
+    pub name: String,
+    pub catalog_ref: String,
+    pub catalog: PathBuf,
+    pub description: Option<String>,
+    pub import_items: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CatalogAddOptions {
+    pub name: String,
+    pub catalog_ref: String,
+    pub description: Option<String>,
+    pub import_items: bool,
+    pub force: bool,
+    pub catalog_file: Option<PathBuf>,
+    pub global: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogTemplate {
+    pub name: String,
+    pub description: Option<String>,
+    pub file_refs: Vec<(String, String)>,
+    pub properties: Vec<(String, Option<String>)>,
+    pub catalog_dir: PathBuf,
+    pub base_ref: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheEntry {
     pub script: PathBuf,
@@ -170,8 +200,10 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
         ));
     }
 
-    let template = init_template(options.template.as_deref())?;
-    validate_init_java_version(template, options.java_version.as_deref())?;
+    let builtin_template = init_template(options.template.as_deref());
+    if let Ok(template) = builtin_template {
+        validate_init_java_version(template, options.java_version.as_deref())?;
+    }
     let base_name = options
         .script
         .file_stem()
@@ -196,10 +228,20 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
         fs::create_dir_all(parent)?;
     }
 
-    fs::write(
-        &options.script,
-        render_init_script(template, base_name, &options),
-    )?;
+    let content = match builtin_template {
+        Ok(template) => render_init_script(template, base_name, &options),
+        Err(builtin_error) => match options.template.as_deref() {
+            Some(name) => {
+                let Some(template) = resolve_catalog_template(name, &std::env::current_dir()?)?
+                else {
+                    return Err(builtin_error);
+                };
+                render_catalog_template(&template, base_name, &options)?
+            }
+            None => return Err(builtin_error),
+        },
+    };
+    fs::write(&options.script, content)?;
     Ok(options.script)
 }
 
@@ -290,13 +332,91 @@ pub fn catalog_aliases(start_dir: &Path) -> Result<Vec<CatalogAlias>> {
     let Some(catalog_path) = find_catalog_file(start_dir) else {
         return Ok(Vec::new());
     };
-    read_catalog_aliases(&catalog_path)
+    let mut seen = HashSet::new();
+    read_catalog_aliases_recursive(&catalog_path, &mut seen)
 }
 
 pub fn resolve_catalog_alias(name: &str, start_dir: &Path) -> Result<Option<CatalogAlias>> {
     Ok(catalog_aliases(start_dir)?
         .into_iter()
         .find(|alias| alias.name == name))
+}
+
+pub fn catalog_refs(start_dir: &Path) -> Result<Vec<CatalogRefEntry>> {
+    let Some(catalog_path) = find_catalog_file(start_dir) else {
+        return Ok(Vec::new());
+    };
+    read_catalog_refs(&catalog_path)
+}
+
+pub fn catalog_add(options: CatalogAddOptions, start_dir: &Path) -> Result<PathBuf> {
+    validate_catalog_entry_name(&options.name, "catalog")?;
+    let catalog_path =
+        writable_catalog_file(options.catalog_file.as_deref(), options.global, start_dir)?;
+    let description = match options.description {
+        Some(description) => Some(description),
+        None => read_catalog_description_from_ref(&options.catalog_ref)
+            .ok()
+            .flatten(),
+    };
+    let mut catalog = read_catalog_json_for_write(&catalog_path)?;
+    let catalogs = ensure_json_object(&mut catalog, "catalogs")?;
+    if catalogs.contains_key(&options.name) && !options.force {
+        return Err(anyhow!(
+            "catalog '{}' already exists in {}; use --force to overwrite",
+            options.name,
+            catalog_path.display()
+        ));
+    }
+    let mut entry = serde_json::Map::new();
+    entry.insert(
+        "catalog-ref".to_string(),
+        serde_json::Value::String(options.catalog_ref),
+    );
+    insert_optional_string(&mut entry, "description", description);
+    if options.import_items {
+        entry.insert("import".to_string(), serde_json::Value::Bool(true));
+    }
+    catalogs.insert(options.name, serde_json::Value::Object(entry));
+    write_catalog_json(&catalog_path, &catalog)?;
+    Ok(catalog_path)
+}
+
+pub fn catalog_templates(start_dir: &Path) -> Result<Vec<CatalogTemplate>> {
+    let mut templates = INIT_TEMPLATES
+        .iter()
+        .map(|template| CatalogTemplate {
+            name: template.name.to_string(),
+            description: Some(template.description.to_string()),
+            file_refs: Vec::new(),
+            properties: Vec::new(),
+            catalog_dir: PathBuf::new(),
+            base_ref: None,
+        })
+        .collect::<Vec<_>>();
+    if let Some(catalog_path) = find_catalog_file(start_dir) {
+        let mut seen = HashSet::new();
+        templates.extend(read_catalog_templates_recursive(&catalog_path, &mut seen)?);
+    }
+    templates.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(templates)
+}
+
+pub fn resolve_catalog_template(name: &str, start_dir: &Path) -> Result<Option<CatalogTemplate>> {
+    if let Some((template_name, catalog_name)) = name.split_once('@') {
+        let Some(catalog) = catalog_refs(start_dir)?
+            .into_iter()
+            .find(|catalog| catalog.name == catalog_name)
+        else {
+            return Ok(None);
+        };
+        return Ok(read_catalog_templates(&catalog.catalog)?
+            .into_iter()
+            .find(|template| template.name == template_name));
+    }
+    Ok(catalog_templates(start_dir)?
+        .into_iter()
+        .find(|template| template.name == name && !template.file_refs.is_empty()))
 }
 
 pub fn alias_add(options: AliasAddOptions, start_dir: &Path) -> Result<PathBuf> {
@@ -530,11 +650,77 @@ fn validate_catalog_entry_name(name: &str, kind: &str) -> Result<()> {
     Ok(())
 }
 
+fn read_catalog_value(catalog_path: &Path) -> Result<serde_json::Value> {
+    let text = if is_remote_url(&catalog_path.to_string_lossy()) {
+        fetch_remote_script(&catalog_path.to_string_lossy())?
+    } else {
+        fs::read_to_string(catalog_path)
+            .with_context(|| format!("failed to read catalog {}", catalog_path.display()))?
+    };
+    serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse catalog {}", catalog_path.display()))
+}
+
+fn read_catalog_description_from_ref(catalog_ref: &str) -> Result<Option<String>> {
+    let catalog_path = resolve_catalog_file_ref(Path::new("."), catalog_ref);
+    Ok(read_catalog_value(&catalog_path)?
+        .get("description")
+        .and_then(|value| value.as_str())
+        .map(str::to_string))
+}
+
+fn read_catalog_refs(catalog_path: &Path) -> Result<Vec<CatalogRefEntry>> {
+    let json = read_catalog_value(catalog_path)?;
+    let Some(catalogs) = json.get("catalogs").and_then(|value| value.as_object()) else {
+        return Ok(Vec::new());
+    };
+    let catalog_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut out = Vec::new();
+    for (name, value) in catalogs {
+        let Some(catalog_ref) = value
+            .get("catalog-ref")
+            .or_else(|| value.get("catalogRef"))
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        out.push(CatalogRefEntry {
+            name: name.to_string(),
+            catalog_ref: catalog_ref.to_string(),
+            catalog: resolve_catalog_file_ref(catalog_dir, catalog_ref),
+            description: value
+                .get("description")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            import_items: value
+                .get("import")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn read_catalog_aliases_recursive(
+    catalog_path: &Path,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<Vec<CatalogAlias>> {
+    if !seen.insert(catalog_path.to_path_buf()) {
+        return Ok(Vec::new());
+    }
+    let mut out = read_catalog_aliases(catalog_path)?;
+    for catalog in read_catalog_refs(catalog_path)? {
+        if catalog.import_items {
+            out.extend(read_catalog_aliases_recursive(&catalog.catalog, seen)?);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 fn read_catalog_aliases(catalog_path: &Path) -> Result<Vec<CatalogAlias>> {
-    let text = fs::read_to_string(catalog_path)
-        .with_context(|| format!("failed to read catalog {}", catalog_path.display()))?;
-    let json: serde_json::Value = serde_json::from_str(&text)
-        .with_context(|| format!("failed to parse catalog {}", catalog_path.display()))?;
+    let json = read_catalog_value(catalog_path)?;
     let Some(aliases) = json.get("aliases").and_then(|value| value.as_object()) else {
         return Ok(Vec::new());
     };
@@ -628,6 +814,97 @@ fn join_url_path(base: &str, child: &str) -> String {
     )
 }
 
+fn resolve_catalog_file_ref(catalog_dir: &Path, catalog_ref: &str) -> PathBuf {
+    let path = if is_remote_url(catalog_ref) || Path::new(catalog_ref).is_absolute() {
+        PathBuf::from(catalog_ref)
+    } else {
+        catalog_dir.join(catalog_ref)
+    };
+    if path.file_name().and_then(|name| name.to_str()) == Some("jbang-catalog.json") {
+        path
+    } else {
+        path.join("jbang-catalog.json")
+    }
+}
+
+fn read_catalog_templates_recursive(
+    catalog_path: &Path,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<Vec<CatalogTemplate>> {
+    if !seen.insert(catalog_path.to_path_buf()) {
+        return Ok(Vec::new());
+    }
+    let mut out = read_catalog_templates(catalog_path)?;
+    for catalog in read_catalog_refs(catalog_path)? {
+        if catalog.import_items {
+            out.extend(read_catalog_templates_recursive(&catalog.catalog, seen)?);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn read_catalog_templates(catalog_path: &Path) -> Result<Vec<CatalogTemplate>> {
+    let json = read_catalog_value(catalog_path)?;
+    let Some(templates) = json.get("templates").and_then(|value| value.as_object()) else {
+        return Ok(Vec::new());
+    };
+    let catalog_dir = catalog_path.parent().unwrap_or_else(|| Path::new("."));
+    let base_ref = json
+        .get("base-ref")
+        .or_else(|| json.get("baseRef"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let mut out = Vec::new();
+    for (name, value) in templates {
+        let file_refs = value
+            .get("file-refs")
+            .or_else(|| value.get("fileRefs"))
+            .and_then(|value| value.as_object())
+            .map(|refs| {
+                refs.iter()
+                    .filter_map(|(target, source)| {
+                        source
+                            .as_str()
+                            .map(|source| (target.clone(), source.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let properties = value
+            .get("properties")
+            .and_then(|value| value.as_object())
+            .map(|properties| {
+                properties
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.clone(),
+                            value
+                                .get("default")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        out.push(CatalogTemplate {
+            name: name.to_string(),
+            description: value
+                .get("description")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            file_refs,
+            properties,
+            catalog_dir: catalog_dir.to_path_buf(),
+            base_ref: base_ref.clone(),
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 pub fn cache_entries(cache_dir: Option<&Path>) -> Result<Vec<CacheEntry>> {
     let root = match cache_dir {
         Some(path) => path.to_path_buf(),
@@ -674,6 +951,57 @@ fn render_init_script(template: InitTemplate, base_name: &str, options: &InitOpt
         "hello" | "java" => render_hello_init_script(base_name, options),
         _ => unreachable!("template was validated"),
     }
+}
+
+fn render_catalog_template(
+    template: &CatalogTemplate,
+    base_name: &str,
+    options: &InitOptions,
+) -> Result<String> {
+    let Some((_, source_ref)) = template.file_refs.first() else {
+        return Err(anyhow!(
+            "template '{}' does not define file-refs",
+            template.name
+        ));
+    };
+    let source_path = resolve_catalog_script_ref(
+        &template.catalog_dir,
+        template.base_ref.as_deref(),
+        source_ref,
+    );
+    let mut content = if is_remote_url(&source_path.to_string_lossy()) {
+        fetch_remote_script(&source_path.to_string_lossy())?
+    } else {
+        fs::read_to_string(&source_path)
+            .with_context(|| format!("failed to read template {}", source_path.display()))?
+    };
+    let mut replacements = vec![
+        ("basename".to_string(), base_name.to_string()),
+        ("baseName".to_string(), base_name.to_string()),
+        ("className".to_string(), base_name.to_string()),
+        ("name".to_string(), base_name.to_string()),
+    ];
+    replacements.extend(
+        template
+            .properties
+            .iter()
+            .filter_map(|(key, value)| value.clone().map(|value| (key.clone(), value))),
+    );
+    if let Some(version) = &options.java_version {
+        replacements.push(("javaVersion".to_string(), version.clone()));
+    }
+    for (key, value) in replacements {
+        content = content.replace(&format!("{{{{{key}}}}}"), &value);
+        content = content.replace(&format!("{{{key}}}"), &value);
+    }
+    if !options.deps.is_empty() {
+        let mut header = String::new();
+        for dep in &options.deps {
+            header.push_str(&format!("//DEPS {dep}\n"));
+        }
+        content = format!("{header}{content}");
+    }
+    Ok(content)
 }
 
 fn render_header(options: &InitOptions, default_java: Option<&str>, out: &mut String) {

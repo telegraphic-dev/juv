@@ -7,10 +7,11 @@ use std::{
 
 use juv::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
-    cache_entries, catalog_aliases, clear_cache, default_cache_dir, export_jar, init_script,
-    init_templates, resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear,
-    trust_entries, trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions,
-    BuildOptions, ExportKind, ExportOptions, InitOptions, KeyValue, RunOptions,
+    cache_entries, catalog_add, catalog_aliases, catalog_refs, catalog_templates, clear_cache,
+    default_cache_dir, export_jar, init_script, resolve_catalog_alias, run_java,
+    split_directive_words, trust_add, trust_clear, trust_entries, trust_remove, AliasAddOptions,
+    AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions, ExportKind,
+    ExportOptions, InitOptions, KeyValue, RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -45,9 +46,11 @@ enum Commands {
     App(AppCommand),
     /// Manage aliases from jbang-catalog.json.
     Alias(AliasCommand),
+    /// Manage external catalogs from jbang-catalog.json.
+    Catalog(CatalogCommand),
     /// Export runnable JARs.
     Export(ExportCommand),
-    /// List built-in init templates.
+    /// List init templates.
     Template(TemplateCommand),
     /// Resolve Maven dependencies without running.
     Resolve(ResolveCommand),
@@ -442,6 +445,51 @@ struct AliasRemoveCommand {
 
 #[derive(Parser, Debug)]
 struct AliasListCommand {
+    /// Print JSON instead of tab-separated text.
+    #[arg(long = "json")]
+    json: bool,
+}
+
+#[derive(Parser, Debug)]
+struct CatalogCommand {
+    #[command(subcommand)]
+    command: CatalogSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum CatalogSubcommand {
+    /// Add an external catalog reference.
+    Add(CatalogAddCommand),
+    /// List external catalog references.
+    List(CatalogListCommand),
+}
+
+#[derive(Parser, Debug)]
+struct CatalogAddCommand {
+    #[command(flatten)]
+    catalog: AliasCatalogOptions,
+
+    /// Catalog name.
+    name: String,
+
+    /// Catalog path, URL, or directory.
+    catalog_ref: String,
+
+    /// Description for the catalog.
+    #[arg(long = "description")]
+    description: Option<String>,
+
+    /// Import aliases and templates from this catalog into local lookup.
+    #[arg(long = "import")]
+    import_items: bool,
+
+    /// Force overwrite of an existing catalog reference.
+    #[arg(long = "force")]
+    force: bool,
+}
+
+#[derive(Parser, Debug)]
+struct CatalogListCommand {
     /// Print JSON instead of tab-separated text.
     #[arg(long = "json")]
     json: bool,
@@ -1060,6 +1108,35 @@ fn print_aliases(json: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_catalogs(json: bool) -> Result<()> {
+    let catalogs = catalog_refs(&std::env::current_dir()?)?;
+    if json {
+        let payload = catalogs
+            .iter()
+            .map(|catalog| {
+                serde_json::json!({
+                    "name": catalog.name,
+                    "catalogRef": catalog.catalog_ref,
+                    "catalog": catalog.catalog.to_string_lossy(),
+                    "description": catalog.description,
+                    "import": catalog.import_items,
+                })
+            })
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        for catalog in catalogs {
+            match catalog.description {
+                Some(description) => {
+                    println!("{}\t{}\t{}", catalog.name, catalog.catalog_ref, description)
+                }
+                None => println!("{}\t{}", catalog.name, catalog.catalog_ref),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_json::Value {
     let directives = &output.directives;
     serde_json::json!({
@@ -1447,6 +1524,28 @@ fn main() -> Result<()> {
                 0
             }
         },
+        Some(Commands::Catalog(cmd)) => match cmd.command {
+            CatalogSubcommand::Add(cmd) => {
+                let catalog = catalog_add(
+                    CatalogAddOptions {
+                        name: cmd.name,
+                        catalog_ref: cmd.catalog_ref,
+                        description: cmd.description,
+                        import_items: cmd.import_items,
+                        force: cmd.force,
+                        catalog_file: cmd.catalog.file,
+                        global: cmd.catalog.global,
+                    },
+                    &std::env::current_dir()?,
+                )?;
+                println!("Catalog added to {}", catalog.display());
+                0
+            }
+            CatalogSubcommand::List(cmd) => {
+                print_catalogs(cmd.json)?;
+                0
+            }
+        },
         Some(Commands::Export(cmd)) => match cmd.command {
             ExportSubcommand::Local(cmd) => {
                 let output = export_jar(apply_alias_to_export(export_options(
@@ -1467,8 +1566,9 @@ fn main() -> Result<()> {
         },
         Some(Commands::Template(cmd)) => match cmd.command {
             TemplateSubcommand::List(cmd) => {
+                let templates = catalog_templates(&std::env::current_dir()?)?;
                 if cmd.json {
-                    let payload = init_templates()
+                    let payload = templates
                         .iter()
                         .map(|template| {
                             serde_json::json!({
@@ -1479,8 +1579,9 @@ fn main() -> Result<()> {
                         .collect::<Vec<_>>();
                     println!("{}", serde_json::to_string_pretty(&payload)?);
                 } else {
-                    for template in init_templates() {
-                        println!("{}	{}", template.name, template.description);
+                    for template in templates {
+                        let description = template.description.unwrap_or_default();
+                        println!("{}\t{}", template.name, description);
                     }
                 }
                 0
