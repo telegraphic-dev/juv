@@ -3,6 +3,12 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag to publish, for example v0.2.0
+        required: true
+        type: string
 
 jobs:
   crates-io:
@@ -11,10 +17,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Resolve release tag
+        id: release
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.release_tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Set crate version from release tag
-        run: python3 scripts/set-release-version.py "${GITHUB_REF_NAME}"
+        run: python3 scripts/set-release-version.py "${{ steps.release.outputs.tag }}"
       - name: Publish
-        run: cargo publish --locked
+        run: cargo publish --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -26,8 +44,20 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve release tag
+        id: release
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.release_tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
       - name: Set crate version from release tag
-        run: python3 scripts/set-release-version.py "${GITHUB_REF_NAME}"
+        run: python3 scripts/set-release-version.py "${{ steps.release.outputs.tag }}"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -39,9 +69,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.tag }}
+            type=semver,pattern={{major}},value=${{ steps.release.outputs.tag }},enable=${{ !startsWith(steps.release.outputs.version, '0.') }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
