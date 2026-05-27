@@ -77,6 +77,7 @@ pub struct Dependency {
     pub scope: Scope,
     pub optional: bool,
     pub exclusions: HashSet<Exclusion>,
+    pub classifier: Option<String>,
 }
 
 impl fmt::Display for Dependency {
@@ -188,6 +189,7 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
                                 },
                                 optional: dep_optional,
                                 exclusions: dep_exclusions.clone(),
+                                classifier: None,
                             };
                             if in_dep_mgmt {
                                 dep_mgmt.push(dep);
@@ -319,6 +321,7 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
             scope: Scope::Compile,
             optional: false,
             exclusions: HashSet::new(),
+            classifier: None,
         })
     } else {
         None
@@ -475,6 +478,21 @@ pub fn resolve(
 
                 // Resolve parent chain first
                 let effective = resolve_parent_chain(&project, repos, &mut project_cache)?;
+
+                // Handle relocation: if this project has a relocation, remove
+                // the old module and track the relocation target instead
+                if let Some(ref reloc) = effective.relocation {
+                    resolved.remove(&dep.module);
+                    resolved.insert(reloc.module.clone(), reloc.version.clone());
+                    let reloc_key = (reloc.module.clone(), reloc.version.clone());
+                    if !project_cache.contains_key(&reloc_key) {
+                        // Fetch the relocated project in the next iteration
+                        next_queue.push(reloc.clone());
+                    }
+                    // Don't cache the old artifact — it's relocated
+                    continue;
+                }
+
                 project_cache.insert(cache_key.clone(), effective);
             }
 
@@ -514,6 +532,7 @@ pub fn resolve(
                             scope: t.scope,
                             optional: t.optional,
                             exclusions: t.exclusions,
+                            classifier: t.classifier.clone(),
                         });
                     }
                 }
@@ -580,8 +599,12 @@ pub fn resolve_classpath(
 
     let mut paths: Vec<PathBuf> = Vec::new();
     for artifact in &artifacts {
+        let group_path = artifact.module.org.replace('.', "/");
         let jar_name = format!("{}-{}.jar", artifact.module.name, artifact.version);
-        let jar_path = cache_dir.join(&jar_name);
+        let jar_path = cache_dir
+            .join(&group_path)
+            .join(&artifact.module.name)
+            .join(&jar_name);
         if jar_path.exists() {
             paths.push(jar_path);
         }
@@ -597,18 +620,35 @@ pub fn parse_coordinate(coord: &str) -> Result<Dependency> {
     let parts: Vec<&str> = coord.split(':').collect();
     if parts.len() < 3 {
         return Err(anyhow!(
-            "invalid Maven coordinate '{coord}' (expected groupId:artifactId:version)"
+            "invalid Maven coordinate '{coord}' (expected groupId:artifactId[:classifier]:version)"
         ));
     }
+
+    // With 4+ segments: group:artifact[:classifier]:version
+    // Last segment is always version. If 4 parts, part[2] is classifier.
+    let (org, name, classifier, version) = if parts.len() >= 4 {
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            Some(parts[2].to_string()),
+            parts[3].to_string(),
+        )
+    } else {
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            None,
+            parts[2].to_string(),
+        )
+    };
+
     Ok(Dependency {
-        module: Module {
-            org: parts[0].to_string(),
-            name: parts[1].to_string(),
-        },
-        version: parts[2].to_string(),
+        module: Module { org, name },
+        version,
         scope: Scope::Compile,
         optional: false,
         exclusions: HashSet::new(),
+        classifier,
     })
 }
 
@@ -662,9 +702,11 @@ fn extract_dependencies(project: &Project, from_dep: &Dependency) -> Vec<Depende
         deps.push(effective);
     }
 
-    // Handle relocation
+    // Handle relocation: if this project declares a relocation, return ONLY
+    // the relocation target — the old coordinates should not remain in the
+    // resolved set. The caller (resolve()) handles the replacement.
     if let Some(ref relocation) = project.relocation {
-        deps.push(relocation.clone());
+        return vec![relocation.clone()];
     }
 
     deps
@@ -783,6 +825,17 @@ fn pick_higher_version(a: &str, b: &str) -> String {
     let pa = parse_version_parts(a);
     let pb = parse_version_parts(b);
     for (sa, sb) in pa.iter().zip(pb.iter()) {
+        let oa = qualifier_order(sa);
+        let ob = qualifier_order(sb);
+        if oa != ob {
+            // Lower qualifier order = more mature/release → wins
+            if oa < ob {
+                return a.to_string();
+            } else {
+                return b.to_string();
+            }
+        }
+        // Same qualifier type — numeric or lexicographic comparison
         match (sa.parse::<u64>(), sb.parse::<u64>()) {
             (Ok(na), Ok(nb)) => {
                 if na > nb {
@@ -808,6 +861,26 @@ fn pick_higher_version(a: &str, b: &str) -> String {
     }
 }
 
+/// Maven qualifier ordering: lower = more mature.
+/// SNAPSHOT < alpha/beta < milestone < RC < release (no qualifier).
+/// See: https://docs.oracle.com/middleware/1212/core/MAVEN/maven_version.htm
+fn qualifier_order(part: &str) -> u32 {
+    let lower = part.to_lowercase();
+    if lower == "snapshot" || lower.ends_with("-snapshot") {
+        0
+    } else if lower.starts_with("alpha") || lower == "a" {
+        1
+    } else if lower.starts_with("beta") || lower == "b" {
+        2
+    } else if lower.starts_with("milestone") || lower == "m" {
+        3
+    } else if lower.starts_with("rc") || lower.starts_with("cr") {
+        4
+    } else {
+        10 // release / numeric
+    }
+}
+
 fn parse_version_parts(v: &str) -> Vec<String> {
     v.split(['.', '-']).map(|s| s.to_string()).collect()
 }
@@ -819,8 +892,14 @@ fn download_jar(
     repos: &[Repository],
     cache_dir: &Path,
 ) -> Result<PathBuf> {
+    // Use groupId path segments to avoid collisions between artifacts
+    // with the same artifactId+version from different groups.
+    let group_path = artifact.module.org.replace('.', "/");
     let jar_name = format!("{}-{}.jar", artifact.module.name, artifact.version);
-    let jar_path = cache_dir.join(&jar_name);
+    let jar_path = cache_dir
+        .join(&group_path)
+        .join(&artifact.module.name)
+        .join(&jar_name);
 
     // 1. Check juv's own cache
     if jar_path.exists() {
@@ -833,8 +912,7 @@ fn download_jar(
         if let Some(parent) = jar_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        std::os::unix::fs::symlink(&cached, &jar_path)
-            .context(format!("failed to symlink {cached:?} → {jar_path:?}"))?;
+        symlink_or_copy(&cached, &jar_path)?;
         return Ok(jar_path);
     }
 
@@ -843,6 +921,9 @@ fn download_jar(
         let url = repo.jar_url(&artifact.module, &artifact.version);
         match ureq::get(&url).call() {
             Ok(response) => {
+                if let Some(parent) = jar_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
                 let mut body = response.into_reader();
                 let mut file = std::fs::File::create(&jar_path)
                     .context(format!("failed to create {jar_path:?}"))?;
@@ -854,6 +935,20 @@ fn download_jar(
     }
 
     Err(anyhow!("JAR for {artifact} not found in any repository"))
+}
+
+/// Create a symlink on Unix, or copy the file on non-Unix platforms.
+fn symlink_or_copy(src: &Path, dst: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dst)
+            .context(format!("failed to symlink {:?} → {:?}", src, dst))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::copy(src, dst).context(format!("failed to copy {:?} → {:?}", src, dst))?;
+    }
+    Ok(())
 }
 
 /// Probe Maven local repo, Gradle cache, and Coursier cache for an existing JAR.
@@ -1047,6 +1142,7 @@ mod tests {
             scope: Scope::Compile,
             optional: false,
             exclusions: HashSet::new(),
+            classifier: None,
         };
         let deps = extract_dependencies(&project, &parent_dep);
         assert_eq!(deps.len(), 2);
@@ -1085,6 +1181,7 @@ mod tests {
             scope: Scope::Compile,
             optional: false,
             exclusions: HashSet::new(),
+            classifier: None,
         };
         let deps = extract_dependencies(&project, &parent_dep);
         assert_eq!(deps.len(), 1);
@@ -1119,6 +1216,7 @@ mod tests {
                 org: "com.google".to_string(),
                 name: "failureaccess".to_string(),
             }]),
+            classifier: None,
         };
         let deps = extract_dependencies(&project, &parent_dep);
         assert!(deps.is_empty(), "excluded dep should be filtered out");
@@ -1181,6 +1279,7 @@ mod tests {
             scope: Scope::Compile,
             optional: false,
             exclusions: HashSet::new(),
+            classifier: None,
         };
         let deps = extract_dependencies(&project, &parent_dep);
         assert_eq!(deps.len(), 1);
@@ -1220,6 +1319,21 @@ mod tests {
         assert_eq!(rel.module.org, "com.newexample");
         assert_eq!(rel.module.name, "new-artifact");
         assert_eq!(rel.version, "2.0.0");
+    }
+
+    #[test]
+    fn classifier_is_parsed_from_four_segment_coordinate() {
+        let dep = parse_coordinate("org.example:lib:sources:1.0").unwrap();
+        assert_eq!(dep.module.org, "org.example");
+        assert_eq!(dep.module.name, "lib");
+        assert_eq!(dep.classifier, Some("sources".to_string()));
+        assert_eq!(dep.version, "1.0");
+    }
+
+    #[test]
+    fn classifier_is_none_from_three_segment_coordinate() {
+        let dep = parse_coordinate("org.example:lib:1.0").unwrap();
+        assert_eq!(dep.classifier, None);
     }
 
     #[test]
