@@ -2063,7 +2063,16 @@ pub fn export_native(options: NativeExportOptions) -> Result<PathBuf> {
     let mut runtime_cp = vec![build.classes_dir];
     runtime_cp.extend(build.classpath);
     native_cmd.arg("-cp").arg(join_classpath(&runtime_cp));
-    native_cmd.arg(format!("-H:Name={}", native_output_name(&output_path)?));
+    let raw_name = native_output_name(&output_path)?;
+    let image_name = if cfg!(windows) {
+        raw_name
+            .strip_suffix(".exe")
+            .unwrap_or(&raw_name)
+            .to_string()
+    } else {
+        raw_name
+    };
+    native_cmd.arg(format!("-H:Name={image_name}"));
     if let Some(parent) = output_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         native_cmd.arg(format!("-H:Path={}", parent.display()));
     }
