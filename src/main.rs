@@ -1519,7 +1519,7 @@ fn junit_reports_dir() -> Result<PathBuf> {
 
 fn read_junit_xml_reports(reports_dir: &Path) -> Result<String> {
     let mut reports = fs::read_dir(reports_dir)?
-        .filter_map(Result::ok)
+        .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "xml"))
         .collect::<Vec<_>>();
@@ -1604,14 +1604,32 @@ fn junit_xml_to_json(xml: &str) -> Result<serde_json::Value> {
 }
 
 fn xml_attr(attrs: &str, name: &str) -> Option<String> {
-    for attr in attrs.split_whitespace() {
-        let Some((attr_name, raw_value)) = attr.split_once('=') else {
-            continue;
+    let mut rest = attrs.trim_start();
+    while !rest.is_empty() {
+        let eq = rest.find('=')?;
+        let attr_name = rest[..eq].trim();
+        let after_eq = rest[eq + 1..].trim_start();
+        let quote = after_eq.chars().next()?;
+        let (value, next) = if quote == '"' || quote == '\'' {
+            let value_start = quote.len_utf8();
+            match after_eq[value_start..].find(quote) {
+                Some(end) => {
+                    let value_end = value_start + end;
+                    (
+                        &after_eq[value_start..value_end],
+                        &after_eq[value_end + quote.len_utf8()..],
+                    )
+                }
+                None => return None,
+            }
+        } else {
+            let end = after_eq.find(char::is_whitespace).unwrap_or(after_eq.len());
+            (&after_eq[..end], &after_eq[end..])
         };
-        if attr_name != name {
-            continue;
+        if attr_name == name {
+            return Some(value.to_string());
         }
-        return Some(raw_value.trim_matches('"').trim_matches('\'').to_string());
+        rest = next.trim_start();
     }
     None
 }
@@ -2206,4 +2224,19 @@ fn main() -> Result<()> {
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod test_command_unit_tests {
+    use super::*;
+
+    #[test]
+    fn xml_attr_preserves_quoted_values_with_spaces() {
+        let attrs = r#"classname="ExampleTest" name="[1] display name with spaces" time="0.001""#;
+        assert_eq!(
+            xml_attr(attrs, "name").as_deref(),
+            Some("[1] display name with spaces")
+        );
+        assert_eq!(xml_attr(attrs, "classname").as_deref(), Some("ExampleTest"));
+    }
 }
