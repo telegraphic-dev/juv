@@ -1945,7 +1945,7 @@ fn unwrap_compact_source(formatted: &str) -> Result<String> {
 #[derive(Debug, Clone)]
 struct PublishCoordinates {
     group: String,
-    name: String,
+    id: String,
     version: String,
 }
 
@@ -1971,7 +1971,7 @@ fn run_publish(cmd: PublishCommand) -> Result<i32> {
     println!(
         "prepared Maven Central dry run bundle for {}:{}:{} at {}",
         descriptor.coordinates.group,
-        descriptor.coordinates.name,
+        descriptor.coordinates.id,
         descriptor.coordinates.version,
         bundle.display()
     );
@@ -2006,9 +2006,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
                 script = Some(base_dir.join(main));
             }
         }
-        if json.get("group").is_some()
-            || json.get("name").is_some()
-            || json.get("version").is_some()
+        if json.get("group").is_some() || json.get("id").is_some() || json.get("version").is_some()
         {
             coordinates = Some(parse_descriptor_coordinates(&json)?);
         }
@@ -2049,7 +2047,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         repos = directives.repos.clone();
     }
     let mut coordinates = coordinates
-        .ok_or_else(|| anyhow::anyhow!("publish requires group, name, and version metadata"))?;
+        .ok_or_else(|| anyhow::anyhow!("publish requires group, id, and version metadata"))?;
     if let Some(version) = &cmd.version {
         coordinates.version = version.clone();
     }
@@ -2057,7 +2055,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         package_name = Some(package_name_override.clone());
     }
     validate_group(&coordinates.group)?;
-    validate_path_safe_coordinate_part(&coordinates.name, "name")?;
+    validate_path_safe_coordinate_part(&coordinates.id, "id")?;
     validate_path_safe_coordinate_part(&coordinates.version, "version")?;
     if let Some(package_name) = package_name.as_deref() {
         validate_package_name(package_name)?;
@@ -2082,7 +2080,7 @@ fn parse_descriptor_coordinates(json: &serde_json::Value) -> Result<PublishCoord
     };
     Ok(PublishCoordinates {
         group: field("group")?,
-        name: field("name")?,
+        id: field("id")?,
         version: field("version")?,
     })
 }
@@ -2094,7 +2092,7 @@ fn parse_gav_directive(raw: &str) -> Result<PublishCoordinates> {
     }
     Ok(PublishCoordinates {
         group: parts[0].to_string(),
-        name: parts[1].to_string(),
+        id: parts[1].to_string(),
         version: parts[2].to_string(),
     })
 }
@@ -2200,13 +2198,13 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     })?;
 
     let base_rel = PathBuf::from(descriptor.coordinates.group.replace('.', "/"))
-        .join(&descriptor.coordinates.name)
+        .join(&descriptor.coordinates.id)
         .join(&descriptor.coordinates.version);
     let artifact_dir = repo_dir.join(&base_rel);
     fs::create_dir_all(&artifact_dir)?;
     let prefix = format!(
         "{}-{}",
-        descriptor.coordinates.name, descriptor.coordinates.version
+        descriptor.coordinates.id, descriptor.coordinates.version
     );
     let jar = artifact_dir.join(format!("{prefix}.jar"));
     write_directory_jar(&build.classes_dir, &jar)?;
@@ -2254,13 +2252,13 @@ fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> R
         format!(
             "{}.{}",
             descriptor.coordinates.group,
-            descriptor.coordinates.name.replace('-', "")
+            descriptor.coordinates.id.replace('-', "")
         )
     });
     if looks_like_compact_source(&source) {
-        anyhow::bail!(
-            "publish cannot package Java compact source files yet; use an explicit class with a package declaration"
-        );
+        let target = staging_dir.join(file_name);
+        fs::write(&target, source)?;
+        return Ok(target);
     }
     validate_package_name(&package_name)?;
     let package_dir = staging_dir.join(package_name.replace('.', "/"));
@@ -2297,9 +2295,9 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
 </project>
 "#,
         xml_escape(&descriptor.coordinates.group),
-        xml_escape(&descriptor.coordinates.name),
+        xml_escape(&descriptor.coordinates.id),
         xml_escape(&descriptor.coordinates.version),
-        xml_escape(&descriptor.coordinates.name),
+        xml_escape(&descriptor.coordinates.id),
         xml_escape(description),
         dependencies
     ))

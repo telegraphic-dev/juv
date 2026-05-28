@@ -34,7 +34,7 @@ fn zip_entry(path: &std::path::Path, name: &str) -> String {
 }
 
 #[test]
-fn publish_dry_run_uses_flat_package_metadata_and_version_override() {
+fn publish_dry_run_uses_flat_id_metadata_and_version_override() {
     let tmp = tempfile::tempdir().unwrap();
     let script = tmp.path().join("Hello.java");
     fs::write(
@@ -53,7 +53,7 @@ public class Hello {
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
-  "name": "hello-tool",
+  "id": "hello-tool",
   "version": "1.0.0",
   "package": "dev.telegraphic.demo.hello",
   "description": "Hello tool",
@@ -144,7 +144,7 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
         tmp.path().join("juv.json"),
         r#"{
   "main": "Hello.java",
-  "group": "dev.telegraphic.demo", "name": "safe", "version": "1.0.0",
+  "group": "dev.telegraphic.demo", "id": "safe", "version": "1.0.0",
   "package": "dev.telegraphic.demo.safe"
 }
 "#,
@@ -176,25 +176,34 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
 }
 
 #[test]
-fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
+fn publish_packages_java_compact_source_files() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        "void main() { IO.println(\"hello\"); }\n",
+    )
+    .unwrap();
     fs::write(
         tmp.path().join("juv.json"),
         r#"{
   "main": "Hello.java",
-  "group": "dev.telegraphic.demo", "name": "compact", "version": "1.0.0",
-  "package": "dev.telegraphic.demo.compact"
+  "group": "dev.telegraphic.demo",
+  "id": "compact",
+  "version": "1.0.0",
+  "java": "25+"
 }
 "#,
     )
     .unwrap();
+    let bundle = tmp.path().join("compact-bundle.zip");
 
     let out = juv_command()
         .arg("publish")
         .arg("--dry-run")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
+        .arg("--output")
+        .arg(&bundle)
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
@@ -202,9 +211,17 @@ fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
         .output()
         .unwrap();
 
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("compact source files"), "{stderr}");
+    assert_success(&out);
+    let names = zip_names(&bundle);
+    let base = "dev/telegraphic/demo/compact/1.0.0";
+    assert!(
+        names.contains(&format!("{base}/compact-1.0.0.jar")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/compact-1.0.0-sources.jar")),
+        "{names:?}"
+    );
 }
 
 #[test]
@@ -223,7 +240,7 @@ fn publish_rejects_path_unsafe_coordinates() {
         r#"{
   "main": "Hello.java",
   "group": ".tmp",
-  "name": "escape",
+  "id": "escape",
   "version": "1.0.0",
   "package": "dev.telegraphic.demo.safe"
 }
@@ -250,8 +267,8 @@ fn publish_rejects_path_unsafe_coordinates() {
 }
 
 #[test]
-fn publish_rejects_path_unsafe_name_and_version_segments() {
-    for (field, value) in [("name", "."), ("version", "..")] {
+fn publish_rejects_path_unsafe_id_and_version_segments() {
+    for (field, value) in [("id", "."), ("version", "..")] {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(
             tmp.path().join("Hello.java"),
@@ -267,12 +284,12 @@ fn publish_rejects_path_unsafe_name_and_version_segments() {
                 r#"{{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
-  "name": "{}",
+  "id": "{}",
   "version": "{}",
   "package": "dev.telegraphic.demo.safe"
 }}
 "#,
-                if field == "name" { value } else { "safe" },
+                if field == "id" { value } else { "safe" },
                 if field == "version" { value } else { "1.0.0" }
             ),
         )
@@ -296,7 +313,7 @@ fn publish_rejects_path_unsafe_name_and_version_segments() {
 }
 
 #[test]
-fn publish_requires_flat_group_name_version_metadata() {
+fn publish_requires_flat_group_id_version_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
     fs::write(
@@ -319,5 +336,5 @@ fn publish_requires_flat_group_name_version_metadata() {
 
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("name is required"), "{stderr}");
+    assert!(stderr.contains("id is required"), "{stderr}");
 }
