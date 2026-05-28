@@ -221,6 +221,89 @@ class Helper {
 }
 
 #[test]
+fn publish_auto_discovers_local_java_sources_when_descriptor_omits_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {
+    System.out.println(Helper.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("Helper.java"),
+        r#"class Helper {
+  static String message() { return "auto"; }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(tmp.path().join("target/generated")).unwrap();
+    fs::write(
+        tmp.path().join("target/generated/Ignored.java"),
+        "class Ignored {}\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "auto-sources",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo.auto",
+  "description": "Auto sources",
+  "url": "https://github.com/telegraphic-dev/auto-sources",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/auto-sources.git", "url": "https://github.com/telegraphic-dev/auto-sources"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("auto-bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "dev/telegraphic/demo/auto-sources/1.0.0";
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/auto-sources-1.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"dev/telegraphic/demo/auto/Hello.java".to_string()),
+        "{sources_names:?}"
+    );
+    assert!(
+        sources_names.contains(&"dev/telegraphic/demo/auto/Helper.java".to_string()),
+        "{sources_names:?}"
+    );
+    assert!(
+        !sources_names
+            .iter()
+            .any(|name| name.ends_with("Ignored.java")),
+        "{sources_names:?}"
+    );
+}
+
+#[test]
 fn publish_target_dir_dot_does_not_delete_unrelated_files() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("keep.txt"), "do not delete").unwrap();

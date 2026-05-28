@@ -1993,6 +1993,7 @@ struct PublishDescriptor {
     java_version: Option<String>,
     deps: Vec<String>,
     sources: Vec<String>,
+    auto_discover_sources: bool,
     repos: Vec<String>,
 }
 
@@ -2036,6 +2037,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let mut java_version = None;
     let mut deps = Vec::new();
     let mut sources = Vec::new();
+    let mut descriptor_sources_present = false;
     let mut repos = Vec::new();
 
     if let Some(path) = descriptor_path {
@@ -2078,6 +2080,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned);
         deps = string_array(&json, "dependencies")?;
+        descriptor_sources_present = json.get("sources").is_some();
         sources = string_array(&json, "sources")?;
         repos = string_array(&json, "repositories")?;
     }
@@ -2179,6 +2182,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         java_version,
         deps,
         sources,
+        auto_discover_sources: !descriptor_sources_present,
         repos,
     })
 }
@@ -2560,13 +2564,29 @@ fn stage_publish_sources(
     let script = stage_publish_source_file(&descriptor.script, descriptor, staging_dir)?;
     let mut extra_sources = Vec::new();
     let mut all_sources = vec![script.clone()];
-    for source in &descriptor.sources {
-        let staged = stage_publish_source_file(
-            &resolve_descriptor_relative_path(&descriptor.descriptor_dir, source),
-            descriptor,
-            staging_dir,
-        )
-        .with_context(|| format!("failed to stage source {source}"))?;
+    let mut source_paths = descriptor
+        .sources
+        .iter()
+        .map(|source| resolve_descriptor_relative_path(&descriptor.descriptor_dir, source))
+        .collect::<Vec<_>>();
+    if descriptor.auto_discover_sources {
+        source_paths.extend(discover_publish_source_files(
+            &descriptor.descriptor_dir,
+            &descriptor.script,
+        )?);
+    }
+    source_paths.sort();
+    source_paths.dedup();
+    let script_canonical = descriptor.script.canonicalize().ok();
+    for source_path in source_paths {
+        if script_canonical
+            .as_ref()
+            .is_some_and(|script| source_path.canonicalize().ok().as_ref() == Some(script))
+        {
+            continue;
+        }
+        let staged = stage_publish_source_file(&source_path, descriptor, staging_dir)
+            .with_context(|| format!("failed to stage source {}", source_path.display()))?;
         let absolute = staged.to_string_lossy().to_string();
         extra_sources.push(absolute);
         all_sources.push(staged);
@@ -2576,6 +2596,47 @@ fn stage_publish_sources(
         extra_sources,
         all_sources,
     })
+}
+
+fn discover_publish_source_files(base_dir: &Path, main_source: &Path) -> Result<Vec<PathBuf>> {
+    if !base_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let main_canonical = main_source.canonicalize().ok();
+    let mut files = Vec::new();
+    for entry in walkdir::WalkDir::new(base_dir)
+        .into_iter()
+        .filter_entry(|entry| {
+            !entry.file_type().is_dir() || !is_ignored_publish_source_dir(entry.path(), base_dir)
+        })
+    {
+        let entry = entry.with_context(|| format!("failed to scan {}", base_dir.display()))?;
+        let path = entry.path();
+        if !entry.file_type().is_file() || !is_java_file(path) {
+            continue;
+        }
+        if main_canonical
+            .as_ref()
+            .is_some_and(|main| path.canonicalize().ok().as_ref() == Some(main))
+        {
+            continue;
+        }
+        files.push(path.to_path_buf());
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn is_ignored_publish_source_dir(path: &Path, base_dir: &Path) -> bool {
+    if path == base_dir {
+        return false;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.starts_with('.') || matches!(name, "target" | "build" | "out" | "classes")
+        })
 }
 
 fn resolve_descriptor_relative_path(base_dir: &Path, path: &str) -> PathBuf {
