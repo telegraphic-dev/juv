@@ -2042,7 +2042,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         wrapper_classpath.extend(error_prone_cp);
         compiler_options.push("-XDcompilePolicy=simple".to_string());
         compiler_options.push("--should-stop=ifError=FLOW".to_string());
-        compiler_options.push("-Xplugin:ErrorProne".to_string());
+        compiler_options.push("-Xplugin:ErrorProne -Xep:DefaultPackage:OFF".to_string());
     }
 
     let output = check_java_command(&java, &wrapper_classpath, &compiler_options, &files)?
@@ -2254,8 +2254,6 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     };
     let launcher_coordinate =
         format!("org.junit.platform:junit-platform-console-standalone:{junit_version}");
-    let mut deps = split_cli_words(&cmd.deps);
-    deps.push(launcher_coordinate);
 
     let (script, inferred_directory_sources) = expand_test_target(&cmd.script)?;
     let mut extra_sources = split_cli_words(&cmd.sources);
@@ -2263,17 +2261,31 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     extra_sources.extend(infer_test_companion_sources(&script));
     dedupe_strings(&mut extra_sources);
 
+    let mut directive_files = vec![script.clone()];
+    let base_dir = script.parent().unwrap_or_else(|| Path::new("."));
+    directive_files.extend(extra_sources.iter().map(|source| base_dir.join(source)));
+    let source_directives = collect_check_directives(&directive_files)?;
+
+    let mut deps = source_directives.deps;
+    deps.extend(split_cli_words(&cmd.deps));
+    deps.push(launcher_coordinate);
+    let mut repos = source_directives.repos;
+    repos.extend(split_cli_words(&cmd.repos));
+    let mut javac_options = source_directives.javac_options;
+    javac_options.extend(cmd.javac_options);
+    let java_version = cmd.java_version.or(source_directives.java_version);
+
     let build = build_java(BuildOptions {
         script,
         extra_deps: deps,
-        extra_repos: split_cli_words(&cmd.repos),
+        extra_repos: repos,
         extra_sources,
         extra_files: split_cli_words(&cmd.files),
         classpath: cmd.classpath,
-        javac_options: cmd.javac_options,
+        javac_options,
         runtime_options: Vec::new(),
         java_agents: split_cli_key_values(&cmd.java_agents),
-        java_version: cmd.java_version,
+        java_version,
         main_class: None,
         cache_dir: cmd.cache_dir,
         trust_remote: cmd.trust,

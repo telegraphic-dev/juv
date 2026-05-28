@@ -192,6 +192,46 @@ class Example {
     assert_eq!(payload["ok"], true);
     assert!(stdout.contains("ReferenceEquality"), "{stdout}");
     assert!(stdout.contains("Example.java"), "{stdout}");
+    assert!(!stdout.contains("DefaultPackage"), "{stdout}");
+}
+
+#[test]
+fn check_ignores_error_prone_default_package_for_scripts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let source = tmp.path().join("Script.java");
+    fs::write(
+        &source,
+        r#"
+class Script {
+  String message() {
+    return "script";
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["ok"], true, "{stdout}");
+    assert_eq!(
+        payload["diagnostics"].as_array().unwrap().len(),
+        0,
+        "{stdout}"
+    );
 }
 
 #[test]
