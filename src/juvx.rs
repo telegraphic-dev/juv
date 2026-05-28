@@ -40,13 +40,31 @@ fn primary_jar_name(coordinate: &str) -> Result<String> {
     })
 }
 
+fn resolve_juvx_coordinate(
+    coordinate: &str,
+    repos: &[crate::resolver::Repository],
+) -> Result<String> {
+    let parts: Vec<&str> = coordinate.split(':').collect();
+    if parts.len() != 2 {
+        crate::resolver::parse_coordinate(coordinate)?;
+        return Ok(coordinate.to_string());
+    }
+    let module = crate::resolver::Module {
+        org: parts[0].to_string(),
+        name: parts[1].to_string(),
+    };
+    let version = crate::resolver::resolve_latest_version(&module, repos)?;
+    Ok(format!("{}:{}:{version}", module.org, module.name))
+}
+
 pub fn run(options: JuvxOptions) -> Result<i32> {
     let cache_dir = match options.cache_dir {
         Some(path) => path,
         None => crate::default_cache_dir()?.join("deps"),
     };
     let repos = maven_repositories(&options.repos);
-    let coordinate = options.coordinate;
+    let requested_coordinate = options.coordinate;
+    let coordinate = resolve_juvx_coordinate(&requested_coordinate, &repos)?;
     let coordinates = vec![coordinate.clone()];
     let classpath = crate::resolver::resolve_classpath(&coordinates, &repos, &cache_dir)?;
     if classpath.is_empty() {

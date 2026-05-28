@@ -302,6 +302,21 @@ pub fn parse_pom(xml: &str) -> Result<Project> {
         properties.insert("project.artifactId".to_string(), artifact_id.clone());
         properties.insert("artifactId".to_string(), artifact_id.clone());
     }
+    if !parent_group_id.is_empty() {
+        properties.insert(
+            "project.parent.groupId".to_string(),
+            parent_group_id.clone(),
+        );
+    }
+    if !parent_artifact_id.is_empty() {
+        properties.insert(
+            "project.parent.artifactId".to_string(),
+            parent_artifact_id.clone(),
+        );
+    }
+    if !parent_version.is_empty() {
+        properties.insert("project.parent.version".to_string(), parent_version.clone());
+    }
 
     // Apply property substitution
     let substitute = |s: &str, props: &HashMap<String, String>| -> String {
@@ -401,6 +416,17 @@ impl Repository {
         }
     }
 
+    /// Build the URL for a module's Maven metadata.
+    pub fn metadata_url(&self, module: &Module) -> String {
+        let group_path = module.org.replace('.', "/");
+        format!(
+            "{}/{}/{}/maven-metadata.xml",
+            self.url.trim_end_matches('/'),
+            group_path,
+            module.name
+        )
+    }
+
     /// Build the URL for a module's POM.
     pub fn pom_url(&self, module: &Module, version: &str) -> String {
         let group_path = module.org.replace('.', "/");
@@ -430,6 +456,143 @@ impl Repository {
             version,
             jar_filename
         )
+    }
+}
+
+/// Fetch Maven metadata from repositories, trying each in order.
+pub fn fetch_maven_metadata(module: &Module, repos: &[Repository]) -> Result<MavenMetadata> {
+    for repo in repos {
+        let url = repo.metadata_url(module);
+        match ureq::get(&url).call() {
+            Ok(response) => {
+                let body = response
+                    .into_string()
+                    .context("failed to read Maven metadata body")?;
+                return parse_maven_metadata(&body)
+                    .context(format!("failed to parse Maven metadata for {module}"));
+            }
+            Err(_) => continue,
+        }
+    }
+    Err(anyhow!(
+        "Maven metadata for {module} not found in any repository"
+    ))
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MavenMetadata {
+    pub latest: Option<String>,
+    pub release: Option<String>,
+    pub versions: Vec<String>,
+}
+
+fn parse_maven_metadata(xml: &str) -> Result<MavenMetadata> {
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut path: Vec<String> = Vec::new();
+    let mut metadata = MavenMetadata::default();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                path.push(String::from_utf8_lossy(e.name().as_ref()).to_string());
+            }
+            Ok(Event::End(_)) => {
+                path.pop();
+            }
+            Ok(Event::Text(e)) => {
+                let text = e.unescape().unwrap_or_default().trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                match path.join("/").as_str() {
+                    "metadata/versioning/latest" => metadata.latest = Some(text),
+                    "metadata/versioning/release" => metadata.release = Some(text),
+                    "metadata/versioning/versions/version" => metadata.versions.push(text),
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(anyhow!(
+                    "XML parse error at {}: {e}",
+                    reader.error_position()
+                ))
+            }
+            _ => {}
+        }
+    }
+
+    Ok(metadata)
+}
+
+pub fn resolve_latest_version(module: &Module, repos: &[Repository]) -> Result<String> {
+    let metadata = fetch_maven_metadata(module, repos)?;
+    metadata
+        .release
+        .or(metadata.latest)
+        .or_else(|| highest_version(&metadata.versions))
+        .ok_or_else(|| anyhow!("Maven metadata for {module} does not list any versions"))
+}
+
+fn is_version_range(version: &str) -> bool {
+    (version.starts_with('[') || version.starts_with('('))
+        && (version.ends_with(']') || version.ends_with(')'))
+}
+
+fn resolve_version_spec(module: &Module, version: &str, repos: &[Repository]) -> Result<String> {
+    if is_version_range(version) {
+        let metadata = fetch_maven_metadata(module, repos)?;
+        select_version_from_range(version, &metadata.versions)
+            .ok_or_else(|| anyhow!("no version of {module} matches range {version}"))
+    } else {
+        Ok(version.to_string())
+    }
+}
+
+fn select_version_from_range(range: &str, versions: &[String]) -> Option<String> {
+    let include_lower = range.starts_with('[');
+    let include_upper = range.ends_with(']');
+    let body = range.strip_prefix(['[', '('])?.strip_suffix([']', ')'])?;
+
+    // Maven also allows exact soft ranges like [1.2.3]. Treat them as exact.
+    let (lower, upper) = match body.split_once(',') {
+        Some((lower, upper)) => (empty_to_none(lower.trim()), empty_to_none(upper.trim())),
+        None => (empty_to_none(body.trim()), empty_to_none(body.trim())),
+    };
+
+    versions
+        .iter()
+        .filter(|version| {
+            let lower_ok = lower.is_none_or(|lower| {
+                if include_lower {
+                    compare_versions(version, lower) != std::cmp::Ordering::Less
+                } else {
+                    compare_versions(version, lower) == std::cmp::Ordering::Greater
+                }
+            });
+            let upper_ok = upper.is_none_or(|upper| {
+                if include_upper {
+                    compare_versions(version, upper) != std::cmp::Ordering::Greater
+                } else {
+                    compare_versions(version, upper) == std::cmp::Ordering::Less
+                }
+            });
+            lower_ok && upper_ok
+        })
+        .cloned()
+        .reduce(|a, b| pick_higher_version(&a, &b))
+}
+
+fn empty_to_none(value: &str) -> Option<&str> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
@@ -504,11 +667,12 @@ pub fn resolve(
             // (handled at extraction time, but double-check here)
 
             // Version reconciliation: if we already resolved this module, use that version
-            let version = if let Some((chosen, _)) = resolved.get(&dep.module) {
+            let requested_version = if let Some((chosen, _)) = resolved.get(&dep.module) {
                 chosen.clone()
             } else {
-                dep.version.clone()
+                resolve_version_spec(&dep.module, &dep.version, repos)?
             };
+            let version = requested_version;
 
             // Skip if already fully processed
             let cache_key = (dep.module.clone(), version.clone());
@@ -555,17 +719,19 @@ pub fn resolve(
                     // Version reconciliation: if already resolved, use higher version
                     let effective_version = match resolved.get(&t.module) {
                         Some((existing, _)) => {
-                            let higher = pick_higher_version(existing, &t.version);
+                            let requested = resolve_version_spec(&t.module, &t.version, repos)?;
+                            let higher = pick_higher_version(existing, &requested);
                             resolved
                                 .insert(t.module.clone(), (higher.clone(), t.classifier.clone()));
                             higher
                         }
                         None => {
+                            let requested = resolve_version_spec(&t.module, &t.version, repos)?;
                             resolved.insert(
                                 t.module.clone(),
-                                (t.version.clone(), t.classifier.clone()),
+                                (requested.clone(), t.classifier.clone()),
                             );
-                            t.version.clone()
+                            requested
                         }
                     };
 
@@ -918,6 +1084,24 @@ fn resolve_parent_chain_inner(
     }
 
     Ok(effective)
+}
+
+fn highest_version(versions: &[String]) -> Option<String> {
+    versions
+        .iter()
+        .cloned()
+        .reduce(|a, b| pick_higher_version(&a, &b))
+}
+
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    if a == b {
+        return std::cmp::Ordering::Equal;
+    }
+    if pick_higher_version(a, b) == a {
+        std::cmp::Ordering::Greater
+    } else {
+        std::cmp::Ordering::Less
+    }
 }
 
 /// Pick the higher of two Maven version strings.
@@ -1432,6 +1616,28 @@ mod tests {
     }
 
     #[test]
+    fn substitutes_project_parent_version_property_in_dependencies() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.2.3</version>
+  </parent>
+  <artifactId>child</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>com.example</groupId>
+      <artifactId>service</artifactId>
+      <version>${project.parent.version}</version>
+    </dependency>
+  </dependencies>
+</project>"#;
+        let project = parse_pom(xml).unwrap();
+        assert_eq!(project.dependencies[0].version, "1.2.3");
+    }
+
+    #[test]
     fn resolves_chained_properties() {
         // jackson.version → jackson.core.version → 2.17.0
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -1528,6 +1734,20 @@ mod tests {
         assert_eq!(pick_higher_version("1.0-RC1", "1.0-SNAPSHOT"), "1.0-RC1");
         // Longer release version beats shorter (1.0.0 > 1.0)
         assert_eq!(pick_higher_version("1.0", "1.0.0"), "1.0.0");
+    }
+
+    #[test]
+    fn version_range_selects_highest_matching_metadata_version() {
+        let versions = vec![
+            "1.79".to_string(),
+            "1.80".to_string(),
+            "1.80.1".to_string(),
+            "1.81".to_string(),
+        ];
+        assert_eq!(
+            select_version_from_range("[1.80,1.81)", &versions).unwrap(),
+            "1.80.1"
+        );
     }
 
     #[test]
