@@ -639,6 +639,66 @@ class Helper {
 }
 
 #[test]
+fn publish_resolves_main_fqn_from_descriptor_to_java_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source_dir = tmp.path().join("src/main/java/com/example/app");
+    fs::create_dir_all(&source_dir).unwrap();
+    fs::write(
+        source_dir.join("Hello.java"),
+        r#"package com.example.app;
+public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbx.json"),
+        r#"{
+  "group": "com.example",
+  "id": "hello",
+  "version": "0.0.0",
+  "package": "com.example.app",
+  "main": "com.example.app.Hello",
+  "description": "Hello tool",
+  "url": "https://github.com/example/hello",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Example"}],
+  "scm": {"connection": "scm:git:https://github.com/example/hello.git", "url": "https://github.com/example/hello"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--file")
+        .arg(tmp.path().join("jbx.json"))
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let base = "com/example/hello/0.0.0";
+    let sources_names = zip_names_from_bytes(zip_entry_bytes(
+        &bundle,
+        &format!("{base}/hello-0.0.0-sources.jar"),
+    ));
+    assert!(
+        sources_names.contains(&"com/example/app/Hello.java".to_string()),
+        "{sources_names:?}"
+    );
+}
+
+#[test]
 fn publish_resolves_extensionless_main_from_descriptor_to_java_file() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(

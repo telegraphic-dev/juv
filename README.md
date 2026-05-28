@@ -183,7 +183,7 @@ CENTRAL_TOKEN_USERNAME=... CENTRAL_TOKEN_PASSWORD=... jbx publish --file jbx.jso
 # or set CENTRAL_PORTAL_TOKEN to base64(username:password)
 ```
 
-Use `--version` when release/tag workflows need to publish a different version than the descriptor. If `main` has no extension, `jbx publish` first checks the exact path and then tries `.java`, `.jsh`, and `.jav` next to the descriptor; missing main files get an explicit `publish main source not found` error.
+Use `--version` when release/tag workflows need to publish a different version than the descriptor. The `main` field accepts either a source path (`src/main/java/dev/telegraphic/demo/HelloTool.java`) or a Java FQN (`dev.telegraphic.demo.HelloTool`). If `main` has no extension, `jbx publish` first checks the exact path, then tries `.java`, `.jsh`, and `.jav` next to the descriptor, then scans Java sources under the descriptor directory for a matching package/class declaration; missing main files get an explicit `publish main source not found` error.
 
 For GitHub-hosted repositories, `jbx publish` can prefill Maven Central POM `url`, `licenses`, `developers`, and `scm` metadata from the `origin` remote plus `gh repo view` when those fields are omitted. Put the fields in `jbx.json` when you want explicit release metadata instead of GitHub-derived defaults. Signed Central-ready bundles require a configured GPG key; `--skip-signing` is only for local inspection. Real Portal publishing requires a generated Maven Central user token supplied via environment variables only: preferably `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` containing the base64-encoded `username:password` value expected by the Portal API.
 

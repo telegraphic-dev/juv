@@ -2462,7 +2462,13 @@ fn resolve_publish_main_path(base_dir: &Path, main: &str) -> PathBuf {
     } else {
         base_dir.join(raw)
     };
-    if exact.exists() || raw.extension().is_some() {
+    if exact.exists() {
+        return exact;
+    }
+    if let Some(candidate) = resolve_publish_main_fqn(base_dir, main) {
+        return candidate;
+    }
+    if raw.extension().is_some() {
         return exact;
     }
     for extension in ["java", "jsh", "jav"] {
@@ -2474,12 +2480,51 @@ fn resolve_publish_main_path(base_dir: &Path, main: &str) -> PathBuf {
     exact
 }
 
+fn resolve_publish_main_fqn(base_dir: &Path, main: &str) -> Option<PathBuf> {
+    if !is_java_fqn(main) {
+        return None;
+    }
+    let (package_name, class_name) = main.rsplit_once('.')?;
+    let package_declaration = format!("package {package_name};");
+    let class_declaration = format!("class {class_name}");
+    let public_class_declaration = format!("public class {class_name}");
+    for entry in walkdir::WalkDir::new(base_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("java") {
+            continue;
+        }
+        if path.file_stem().and_then(|stem| stem.to_str()) != Some(class_name) {
+            continue;
+        }
+        let Ok(source) = fs::read_to_string(path) else {
+            continue;
+        };
+        if source.contains(&package_declaration)
+            && (source.contains(&public_class_declaration) || source.contains(&class_declaration))
+        {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
+}
+
+fn is_java_fqn(value: &str) -> bool {
+    value.split('.').filter(|part| !part.is_empty()).count() >= 2
+        && value.split('.').all(is_java_identifier)
+}
+
 fn publish_main_hint(path: &Path) -> String {
     if path.extension().is_some() {
         String::new()
     } else {
         format!(
-            " (also checked {}.java, {}.jsh, and {}.jav)",
+            " (also checked {}.java, {}.jsh, {}.jav, and Java FQN matches under the descriptor directory)",
             path.display(),
             path.display(),
             path.display()
@@ -3349,28 +3394,8 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     }
 
     let jdk_root = jbx::jdk::resolve_jdk(&directives.java_version, true)?;
-    let javac = jbx::jdk::javac_bin_path(&jdk_root);
     let java = jbx::jdk::java_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
-    let wrapper_dir = root.join("compiler-wrapper");
-    fs::create_dir_all(&wrapper_dir)?;
-    let wrapper_source = wrapper_dir.join("JuvCheckCompiler.java");
-    let wrapper_class = wrapper_dir.join("JuvCheckCompiler.class");
-    fs::write(&wrapper_source, CHECK_COMPILER_SOURCE)?;
-    let wrapper_needs_compile = !wrapper_class.exists()
-        || fs::metadata(&wrapper_source)?.modified()? > fs::metadata(&wrapper_class)?.modified()?;
-    if wrapper_needs_compile {
-        let status = ProcessCommand::new(&javac)
-            .arg(&wrapper_source)
-            .status()
-            .with_context(|| format!("failed to execute {}", javac.display()))?;
-        if !status.success() {
-            return Err(anyhow::anyhow!(
-                "failed to compile jbx check compiler wrapper with exit code {}",
-                status.code().unwrap_or(1)
-            ));
-        }
-    }
 
     let mut compiler_options = vec!["-Xlint:all".to_string(), "-proc:none".to_string()];
     let classes_dir = root.join("classes");
@@ -3421,10 +3446,17 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         compiler_options.push("-Werror".to_string());
     }
 
-    let mut wrapper_classpath = vec![wrapper_dir.clone()];
+    let repos = maven_tool::maven_repositories(&directives.repos);
+    let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
+    let mut wrapper_classpath = jbx::resolver::resolve_classpath(
+        &[JBX_CHECK_COMPILER_COORDINATE.to_string()],
+        &repos,
+        &cache_dir,
+    )?;
+    if wrapper_classpath.is_empty() {
+        anyhow::bail!("no JARs resolved for {JBX_CHECK_COMPILER_COORDINATE}");
+    }
     if !cmd.no_error_prone {
-        let repos = maven_tool::maven_repositories(&split_cli_words(&cmd.repos));
-        let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
         let error_prone_coordinate = format!(
             "{ERROR_PRONE_GROUP_ID}:{ERROR_PRONE_ARTIFACT_ID}:{}",
             cmd.error_prone_version
@@ -3471,7 +3503,7 @@ fn check_java_command<'a>(
         std::env::join_paths(wrapper_classpath)
             .context("failed to build jbx check compiler wrapper classpath")?,
     );
-    command.arg("JuvCheckCompiler");
+    command.arg(JBX_CHECK_COMPILER_MAIN_CLASS);
     command.args(compiler_options);
     command.arg("--");
     command.args(files);
@@ -3535,95 +3567,8 @@ fn print_check_human(payload: &serde_json::Value) -> Result<()> {
 const ERROR_PRONE_GROUP_ID: &str = "com.google.errorprone";
 const ERROR_PRONE_ARTIFACT_ID: &str = "error_prone_core";
 const DEFAULT_ERROR_PRONE_VERSION: &str = "2.39.0";
-
-const CHECK_COMPILER_SOURCE: &str = r#"
-import javax.tools.*;
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-
-public class JuvCheckCompiler {
-  public static void main(String[] args) throws Exception {
-    List<String> options = new ArrayList<>();
-    List<String> files = new ArrayList<>();
-    boolean afterSeparator = false;
-    for (String arg : args) {
-      if (arg.equals("--")) {
-        afterSeparator = true;
-      } else if (afterSeparator) {
-        files.add(arg);
-      } else {
-        options.add(arg);
-      }
-    }
-
-    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-    if (compiler == null) {
-      System.err.println("No system Java compiler available. Run with a JDK, not a JRE.");
-      System.exit(2);
-    }
-
-    DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
-    StandardJavaFileManager fm = compiler.getStandardFileManager(diagnostics, Locale.ROOT, StandardCharsets.UTF_8);
-    Iterable<? extends JavaFileObject> units = fm.getJavaFileObjectsFromStrings(files);
-    StringWriter compilerOut = new StringWriter();
-    Boolean ok = compiler.getTask(compilerOut, fm, diagnostics, options, null, units).call();
-
-    StringBuilder sb = new StringBuilder();
-    sb.append("{\n  \"ok\": ").append(Boolean.TRUE.equals(ok)).append(",\n  \"diagnostics\": [\n");
-    List<Diagnostic<? extends JavaFileObject>> ds = diagnostics.getDiagnostics();
-    for (int i = 0; i < ds.size(); i++) {
-      Diagnostic<? extends JavaFileObject> d = ds.get(i);
-      sb.append("    {");
-      field(sb, "kind", d.getKind().toString()); sb.append(",");
-      field(sb, "code", d.getCode()); sb.append(",");
-      field(sb, "file", d.getSource() == null ? null : new File(d.getSource().toUri()).getPath()); sb.append(",");
-      sb.append("\"line\": ").append(d.getLineNumber()).append(",");
-      sb.append("\"column\": ").append(d.getColumnNumber()).append(",");
-      field(sb, "message", d.getMessage(Locale.ROOT));
-      sb.append("}");
-      if (i + 1 < ds.size()) sb.append(",");
-      sb.append("\n");
-    }
-    sb.append("  ],\n");
-    field(sb, "compilerOutput", compilerOut.toString());
-    sb.append("\n}\n");
-    System.out.print(sb);
-    fm.close();
-    System.exit(Boolean.TRUE.equals(ok) ? 0 : 1);
-  }
-
-  private static void field(StringBuilder sb, String name, String value) {
-    sb.append("\"").append(esc(name)).append("\": ");
-    if (value == null) {
-      sb.append("null");
-    } else {
-      sb.append("\"").append(esc(value)).append("\"");
-    }
-  }
-
-  private static String esc(String s) {
-    StringBuilder out = new StringBuilder();
-    for (int i = 0; i < s.length(); i++) {
-      char c = s.charAt(i);
-      switch (c) {
-        case '\\': out.append("\\\\"); break;
-        case '"': out.append("\\\""); break;
-        case '\n': out.append("\\n"); break;
-        case '\r': out.append("\\r"); break;
-        case '\t': out.append("\\t"); break;
-        default:
-          if (c < 0x20) {
-            out.append(String.format("\\u%04x", (int)c));
-          } else {
-            out.append(c);
-          }
-      }
-    }
-    return out.toString();
-  }
-}
-"#;
+const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.0";
+const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckCompiler";
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
