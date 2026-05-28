@@ -53,9 +53,9 @@ def main() -> None:
         raise SystemExit("usage: set-release-version.py <release-tag>")
 
     version = version_from_tag(sys.argv[1])
-    replace_package_version(Path("Cargo.toml"), "juv", version)
-    replace_package_version(Path("Cargo.lock"), "juv", version)
-    print(f"Set juv release version to {version}")
+    replace_package_version(Path("Cargo.toml"), "jbx", version)
+    replace_package_version(Path("Cargo.lock"), "jbx", version)
+    print(f"Set jbx release version to {version}")
 
 
 if __name__ == "__main__":

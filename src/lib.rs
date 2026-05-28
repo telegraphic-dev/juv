@@ -10,7 +10,7 @@ use std::process::Command;
 use zip::write::SimpleFileOptions;
 
 pub mod jdk;
-pub mod juvx;
+pub mod maven_tool;
 pub mod resolver;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -314,7 +314,7 @@ fn init_template(template: Option<&str>) -> Result<InitTemplate> {
 pub fn default_cache_dir() -> Result<PathBuf> {
     Ok(dirs::cache_dir()
         .ok_or_else(|| anyhow!("could not determine cache directory"))?
-        .join("juv"))
+        .join("jbx"))
 }
 
 pub fn clear_cache(cache_dir: Option<&Path>) -> Result<()> {
@@ -1053,7 +1053,7 @@ fn insert_template_deps(content: &str, deps: &[String]) -> String {
 }
 
 fn render_header(options: &InitOptions, default_java: Option<&str>, out: &mut String) {
-    out.push_str("///usr/bin/env juv \"$0\" \"$@\" ; exit $?\n");
+    out.push_str("///usr/bin/env jbx \"$0\" \"$@\" ; exit $?\n");
     if let Some(version) = options.java_version.as_deref().or(default_java) {
         out.push_str(&format!("//JAVA {version}\n"));
     }
@@ -1098,7 +1098,7 @@ import picocli.CommandLine.Parameters;
 import java.util.concurrent.Callable;
 
 @Command(name = "{base_name}", mixinStandardHelpOptions = true, version = "{base_name} 0.1",
-        description = "{base_name} made with juv")
+        description = "{base_name} made with jbx")
 class {base_name} implements Callable<Integer> {{
 
     @Parameters(index = "0", description = "The greeting to print", defaultValue = "World!")
@@ -1140,14 +1140,14 @@ import java.security.ProtectionDomain;
 public class {base_name} {{
 
     public static void premain(String agentArgs, Instrumentation instrumentation) {{
-        System.out.println("juv agent {base_name} loaded. Will dump all loaded classes into `classes/`");
+        System.out.println("jbx agent {base_name} loaded. Will dump all loaded classes into `classes/`");
         instrumentation.addTransformer(new ClassLogger());
     }}
 
     public static void main(String[] args) {{
-        System.out.println("This is a juv javaagent.\n" +
+        System.out.println("This is a jbx javaagent.\n" +
                            "Usage: \n" +
-                           "   juv run --javaagent={base_name}.java yourApp.java");
+                           "   jbx run --javaagent={base_name}.java yourApp.java");
     }}
 
     public static class ClassLogger implements ClassFileTransformer {{
@@ -1344,15 +1344,9 @@ fn materialize_script(
         let hash = trusted_remote_hash(&source, &resources);
         if trust_remote {
             write_trust_entry(&script_text, &hash, cache_dir)?;
-        } else if !is_trusted_remote_with_legacy_fallback(
-            &script_text,
-            &hash,
-            &source,
-            resources.is_empty(),
-            cache_dir,
-        )? {
+        } else if !is_trusted_remote(&script_text, &hash, cache_dir)? {
             return Err(anyhow!(
-                "remote script {} is not trusted; run `juv trust add {}` or pass `juv run --trust {}`",
+                "remote script {} is not trusted; run `jbx trust add {}` or pass `jbx run --trust {}`",
                 script_text,
                 script_text,
                 script_text
@@ -1497,7 +1491,7 @@ fn validate_remote_relative_ref(resource_ref: &str) -> Result<()> {
 
 fn trusted_remote_hash(source: &str, resources: &[RemoteRelativeResource]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"juv-remote-v2\nmain\0");
+    hasher.update(b"jbx-remote-v1\nmain\0");
     hasher.update(source.as_bytes());
     for resource in resources {
         hasher.update(b"\nresource\0");
@@ -1507,12 +1501,6 @@ fn trusted_remote_hash(source: &str, resources: &[RemoteRelativeResource]) -> St
         hasher.update(b"\0");
         hasher.update(resource.body.as_bytes());
     }
-    format!("{:x}", hasher.finalize())
-}
-
-fn legacy_remote_hash(source: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(source.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
@@ -1542,24 +1530,11 @@ fn resolve_remote_resource_url(remote_url: &str, resource_ref: &str) -> Result<S
     Ok(format!("{base_dir}{resource_ref}"))
 }
 
-fn is_trusted_remote_with_legacy_fallback(
-    url: &str,
-    hash: &str,
-    source: &str,
-    allow_legacy_hash: bool,
-    cache_dir: Option<&Path>,
-) -> Result<bool> {
+fn is_trusted_remote(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<bool> {
     let entries = trust_entries(cache_dir)?;
-    if entries
+    Ok(entries
         .iter()
-        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash)
-    {
-        return Ok(true);
-    }
-    Ok(allow_legacy_hash
-        && entries.iter().any(|(entry_url, entry_hash)| {
-            entry_url == url && entry_hash == &legacy_remote_hash(source)
-        }))
+        .any(|(entry_url, entry_hash)| entry_url == url && entry_hash == hash))
 }
 
 fn write_trust_entry(url: &str, hash: &str, cache_dir: Option<&Path>) -> Result<()> {
@@ -2322,7 +2297,7 @@ pub fn app_bin_dir() -> Result<PathBuf> {
     Ok(dirs::data_local_dir()
         .or_else(dirs::data_dir)
         .ok_or_else(|| anyhow!("could not determine local data directory"))?
-        .join("juv")
+        .join("jbx")
         .join("bin"))
 }
 
@@ -2359,7 +2334,7 @@ pub fn app_install(options: AppInstallOptions) -> Result<PathBuf> {
         ));
     }
 
-    let juv_path = find_juv_binary()?;
+    let juv_path = find_jbx_binary()?;
 
     // Build the wrapper script content
     let content = format!(
@@ -2432,8 +2407,8 @@ fn validate_app_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(anyhow!("command name cannot be empty"));
     }
-    if name == "juv" {
-        return Err(anyhow!("'juv' is a reserved command name"));
+    if name == "jbx" {
+        return Err(anyhow!("'jbx' is a reserved command name"));
     }
     // Must be a portable filename
     let valid =
@@ -2444,14 +2419,14 @@ fn validate_app_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn find_juv_binary() -> Result<PathBuf> {
+fn find_jbx_binary() -> Result<PathBuf> {
     // Prefer the currently-running binary if possible
     if let Ok(exe) = std::env::current_exe() {
         if exe.exists() {
             return Ok(exe);
         }
     }
-    which::which("juv").context("could not locate juv binary on PATH")
+    which::which("jbx").context("could not locate jbx binary on PATH")
 }
 
 fn shell_quote_path(path: &Path) -> String {
@@ -2468,8 +2443,8 @@ fn shell_quote_path(path: &Path) -> String {
 
 fn parse_wrapper_target(wrapper: &Path) -> Option<String> {
     let content = fs::read_to_string(wrapper).ok()?;
-    // Wrapper line looks like: exec /path/to/juv run -- /path/to/script.java "$@"
-    // Or with quoting:          exec /path/to/juv run -- '/path/with spaces/script.java' "$@"
+    // Wrapper line looks like: exec /path/to/jbx run -- /path/to/script.java "$@"
+    // Or with quoting:          exec /path/to/jbx run -- '/path/with spaces/script.java' "$@"
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("exec ") {
             if let Some(idx) = rest.find(" run -- ") {

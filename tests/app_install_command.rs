@@ -2,20 +2,20 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-fn juv() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_juv"))
+fn jbx() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jbx"))
 }
 
 // Use a custom bin dir to avoid polluting the user's actual PATH.
 fn juv_with_home(home: &PathBuf) -> std::process::Command {
-    let mut cmd = std::process::Command::new(juv());
+    let mut cmd = std::process::Command::new(jbx());
     cmd.env("XDG_DATA_HOME", home);
-    // Ensure the juv binary can find itself
+    // Ensure the jbx binary can find itself
     cmd.env(
         "PATH",
         format!(
             "{}:{}",
-            juv().parent().unwrap().display(),
+            jbx().parent().unwrap().display(),
             std::env::var("PATH").unwrap_or_default()
         ),
     );
@@ -47,7 +47,7 @@ fn app_install_creates_wrapper_script() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "juv app install failed:\nstdout: {stdout}\nstderr: {stderr}"
+        "jbx app install failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(
         stdout.contains("Command installed:"),
@@ -88,7 +88,7 @@ fn app_install_with_custom_name() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
-        "juv app install --name failed:\nstdout: {stdout}\nstderr: {}",
+        "jbx app install --name failed:\nstdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
@@ -259,10 +259,10 @@ fn app_install_refuses_reserved_name() {
     let script = create_test_script(script_dir.path(), "Hello.java");
 
     let output = juv_with_home(&home.path().to_path_buf())
-        .args(["app", "install", "--name", "juv", script.to_str().unwrap()])
+        .args(["app", "install", "--name", "jbx", script.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(!output.status.success(), "installing 'juv' should fail");
+    assert!(!output.status.success(), "installing 'jbx' should fail");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("reserved"),

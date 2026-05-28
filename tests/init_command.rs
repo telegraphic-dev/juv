@@ -2,7 +2,7 @@ use std::fs;
 use std::process::{Command, Output};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -28,7 +28,7 @@ fn init_creates_default_java_script_from_filename() {
 
     assert_success(&out);
     let content = fs::read_to_string(&script).unwrap();
-    assert!(content.starts_with("///usr/bin/env juv"));
+    assert!(content.starts_with("///usr/bin/env jbx"));
     assert!(content.contains("//JAVA 25+"));
     assert!(content.contains("void main(String... args)"));
     assert!(content.contains("IO.println(\"Hello World\")"));

@@ -5,8 +5,8 @@ use std::net::TcpListener;
 use std::process::{Command, Output};
 use std::thread;
 
-fn juvx_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juvx"))
+fn jbx_command() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -38,7 +38,7 @@ package dev.telegraphic.tool;
 
 public class Tool {
   public static void main(String[] args) {
-    System.out.println("juvx " + String.join(",", args));
+    System.out.println("jbx " + String.join(",", args));
   }
 }
 "#,
@@ -94,7 +94,7 @@ fn serve_files(files: HashMap<&'static str, Vec<u8>>) -> String {
 }
 
 #[test]
-fn juvx_runs_executable_jar_from_gav() {
+fn jbx_runs_executable_jar_from_gav_shorthand() {
     let tmp = tempfile::tempdir().unwrap();
     let jar = build_executable_jar(&tmp);
     let pom = br#"
@@ -117,7 +117,50 @@ fn juvx_runs_executable_jar_from_gav() {
         ),
     ]));
 
-    let output = juvx_command()
+    let output = jbx_command()
+        .arg("--repo")
+        .arg(format!("local={repo}"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache-jbx"))
+        .arg("dev.telegraphic:hello-tool:1.0.0")
+        .arg("--")
+        .arg("jay")
+        .arg("box")
+        .output()
+        .expect("failed to run jbx Maven executable shorthand");
+
+    assert_success(&output);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "jbx jay,box"
+    );
+}
+
+#[test]
+fn jbx_runs_executable_jar_from_gav() {
+    let tmp = tempfile::tempdir().unwrap();
+    let jar = build_executable_jar(&tmp);
+    let pom = br#"
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.telegraphic</groupId>
+  <artifactId>hello-tool</artifactId>
+  <version>1.0.0</version>
+</project>
+"#
+    .to_vec();
+    let repo = serve_files(HashMap::from([
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.pom",
+            pom,
+        ),
+        (
+            "/dev/telegraphic/hello-tool/1.0.0/hello-tool-1.0.0.jar",
+            jar,
+        ),
+    ]));
+
+    let output = jbx_command()
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
@@ -127,15 +170,15 @@ fn juvx_runs_executable_jar_from_gav() {
         .arg("alpha")
         .arg("beta")
         .output()
-        .expect("failed to run juv juvx");
+        .expect("failed to run jbx Maven executable");
 
     assert_success(&output);
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
-        "juvx alpha,beta"
+        "jbx alpha,beta"
     );
 
-    let output = juvx_command()
+    let output = jbx_command()
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
@@ -146,14 +189,14 @@ fn juvx_runs_executable_jar_from_gav() {
         .arg("--")
         .arg("gamma")
         .output()
-        .expect("failed to run juv juvx with --main after coordinate");
+        .expect("failed to run jbx Maven executable with --main after coordinate");
 
     assert_success(&output);
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "juvx gamma");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx gamma");
 }
 
 #[test]
-fn juvx_uses_latest_metadata_version_when_gav_version_is_omitted() {
+fn jbx_uses_latest_metadata_version_when_gav_version_is_omitted() {
     let tmp = tempfile::tempdir().unwrap();
     let jar = build_executable_jar(&tmp);
     let metadata = br#"
@@ -192,7 +235,7 @@ fn juvx_uses_latest_metadata_version_when_gav_version_is_omitted() {
         ),
     ]));
 
-    let output = juvx_command()
+    let output = jbx_command()
         .arg("--repo")
         .arg(format!("local={repo}"))
         .arg("--cache-dir")
@@ -201,8 +244,8 @@ fn juvx_uses_latest_metadata_version_when_gav_version_is_omitted() {
         .arg("--")
         .arg("delta")
         .output()
-        .expect("failed to run juvx with omitted coordinate version");
+        .expect("failed to run jbx with omitted coordinate version");
 
     assert_success(&output);
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "juvx delta");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "jbx delta");
 }

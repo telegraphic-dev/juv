@@ -1,4 +1,3 @@
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
@@ -7,14 +6,8 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-fn legacy_sha256(source: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(source.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -155,31 +148,6 @@ fn remote_scripts_require_trust_before_execution() {
         "stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-}
-
-#[test]
-fn legacy_trust_hash_still_allows_remote_scripts_without_relative_resources() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cache = tmp.path().join("cache");
-    let source = "class RemoteHello { public static void main(String[] args) { System.out.print(\"legacy\"); } }\n";
-    let url = serve_n(source, 1);
-    fs::create_dir_all(&cache).unwrap();
-    fs::write(
-        cache.join("trust.tsv"),
-        format!("{}\t{}\n", url, legacy_sha256(source)),
-    )
-    .unwrap();
-
-    let out = juv_command()
-        .arg("run")
-        .arg("--cache-dir")
-        .arg(&cache)
-        .arg(&url)
-        .output()
-        .unwrap();
-
-    assert_success(&out);
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "legacy");
 }
 
 #[test]

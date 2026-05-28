@@ -2,7 +2,7 @@ use std::fs;
 use std::process::{Command, Output};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {

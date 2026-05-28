@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
 #[derive(Debug, Clone)]
-pub struct JuvxOptions {
+pub struct MavenToolOptions {
     pub coordinate: String,
     pub repos: Vec<String>,
     pub cache_dir: Option<PathBuf>,
@@ -40,7 +40,7 @@ fn primary_jar_name(coordinate: &str) -> Result<String> {
     })
 }
 
-fn resolve_juvx_coordinate(
+fn resolve_maven_tool_coordinate(
     coordinate: &str,
     repos: &[crate::resolver::Repository],
 ) -> Result<String> {
@@ -57,14 +57,14 @@ fn resolve_juvx_coordinate(
     Ok(format!("{}:{}:{version}", module.org, module.name))
 }
 
-pub fn run(options: JuvxOptions) -> Result<i32> {
+pub fn run(options: MavenToolOptions) -> Result<i32> {
     let cache_dir = match options.cache_dir {
         Some(path) => path,
         None => crate::default_cache_dir()?.join("deps"),
     };
     let repos = maven_repositories(&options.repos);
     let requested_coordinate = options.coordinate;
-    let coordinate = resolve_juvx_coordinate(&requested_coordinate, &repos)?;
+    let coordinate = resolve_maven_tool_coordinate(&requested_coordinate, &repos)?;
     let coordinates = vec![coordinate.clone()];
     let classpath = crate::resolver::resolve_classpath(&coordinates, &repos, &cache_dir)?;
     if classpath.is_empty() {

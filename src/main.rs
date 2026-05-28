@@ -9,25 +9,41 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use juv::{
+use jbx::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
     cache_entries, catalog_add, catalog_aliases, catalog_refs, catalog_templates, clear_cache,
-    default_cache_dir, export_jar, export_native, init_script, juvx, resolve_catalog_alias,
+    default_cache_dir, export_jar, export_native, init_script, maven_tool, resolve_catalog_alias,
     run_java, split_directive_words, trust_add, trust_clear, trust_entries, trust_remove,
     AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions,
     ExportKind, ExportOptions, InitOptions, KeyValue, NativeExportOptions, RunOptions,
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "juv", version, about = "juv: a Rust port of JBang")]
+#[command(
+    name = "jbx",
+    version,
+    about = "jbx: one-stop Java toolbox for scripts, tools, and agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Script to run when no subcommand is given, JBang-style.
+    /// Additional repository for Maven executable shorthand (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override dependency cache directory for Maven executable shorthand.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Main class for Maven executable shorthand instead of java -jar.
+    #[arg(long = "main")]
+    main_class: Option<String>,
+
+    /// Script to run, or Maven coordinates to launch as a Java tool.
     script: Option<PathBuf>,
 
-    /// Arguments passed to the script when no subcommand is given.
+    /// Arguments passed to the script/tool when no subcommand is given.
     #[arg(trailing_var_arg = true)]
     args: Vec<String>,
 }
@@ -68,8 +84,6 @@ enum Commands {
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
     Fmt(FmtCommand),
-    /// Run an executable JAR resolved from Maven coordinates.
-    Juvx(JuvxCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -202,14 +216,14 @@ struct BuildCommand {
 
 #[derive(Parser, Debug)]
 struct PublishCommand {
-    /// Java source file to publish. Defaults to juv.json main when --file is used.
+    /// Java source file to publish. Defaults to jbx.json main when --file is used.
     script: Option<PathBuf>,
 
-    /// juv descriptor file. Defaults to ./juv.json when present.
+    /// jbx descriptor file. Defaults to ./jbx.json when present.
     #[arg(long = "file")]
     file: Option<PathBuf>,
 
-    /// Override version from juv.json or //GAV.
+    /// Override version from jbx.json or //GAV.
     #[arg(long = "version")]
     version: Option<String>,
 
@@ -459,9 +473,9 @@ struct CacheCommand {
 
 #[derive(Subcommand, Debug)]
 enum CacheSubcommand {
-    /// Clear the juv cache directory.
+    /// Clear the jbx cache directory.
     Clear(CacheClearCommand),
-    /// Print the effective juv cache directory.
+    /// Print the effective jbx cache directory.
     Path(CachePathCommand),
     /// List cached script entries.
     List(CacheListCommand),
@@ -963,28 +977,6 @@ struct FetchCommand {
 }
 
 #[derive(Parser, Debug)]
-struct JuvxCommand {
-    /// Maven coordinate to resolve and run (groupId:artifactId[:classifier]:version).
-    coordinate: String,
-
-    /// Additional repository (id=url format or bare URL).
-    #[arg(long = "repo", alias = "repos")]
-    repos: Vec<String>,
-
-    /// Override dependency cache directory.
-    #[arg(long = "cache-dir")]
-    cache_dir: Option<PathBuf>,
-
-    /// Main class to launch with the resolved classpath instead of java -jar.
-    #[arg(long = "main")]
-    main_class: Option<String>,
-
-    /// Arguments passed to the launched Java tool after `--`.
-    #[arg(last = true)]
-    args: Vec<String>,
-}
-
-#[derive(Parser, Debug)]
 struct CacheClearCommand {
     /// Override cache directory.
     #[arg(long = "cache-dir")]
@@ -1023,7 +1015,7 @@ enum InfoSubcommand {
     Tools(InfoToolsCommand),
     /// Print documentation references declared by the script.
     Docs(InfoDocsCommand),
-    /// Print the effective juv cache directory.
+    /// Print the effective jbx cache directory.
     Cache(InfoCacheCommand),
     /// Print effective main class.
     Main(InfoScriptCommand),
@@ -1211,7 +1203,7 @@ fn repo_json(repo: &str) -> serde_json::Value {
     }
 }
 
-fn key_values_json(values: &[juv::KeyValue]) -> serde_json::Value {
+fn key_values_json(values: &[jbx::KeyValue]) -> serde_json::Value {
     serde_json::Value::Array(
         values
             .iter()
@@ -1220,7 +1212,7 @@ fn key_values_json(values: &[juv::KeyValue]) -> serde_json::Value {
     )
 }
 
-fn docs_json(values: &[juv::KeyValue]) -> serde_json::Value {
+fn docs_json(values: &[jbx::KeyValue]) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for kv in values {
         let (id, target) = match &kv.value {
@@ -1317,9 +1309,9 @@ fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
     Ok(())
 }
 
-fn parsed_directives(script: &PathBuf) -> Result<juv::Directives> {
+fn parsed_directives(script: &PathBuf) -> Result<jbx::Directives> {
     let source = fs::read_to_string(script)?;
-    Ok(juv::parse_directives(&source))
+    Ok(jbx::parse_directives(&source))
 }
 
 fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
@@ -1412,7 +1404,7 @@ fn apply_alias_to_native_export(mut options: NativeExportOptions) -> Result<Nati
     Ok(options)
 }
 
-fn alias_for_script(script: &Path) -> Result<Option<juv::CatalogAlias>> {
+fn alias_for_script(script: &Path) -> Result<Option<jbx::CatalogAlias>> {
     let name = script.to_string_lossy().to_string();
     if script.exists() || name.starts_with("http://") || name.starts_with("https://") {
         return Ok(None);
@@ -1422,7 +1414,7 @@ fn alias_for_script(script: &Path) -> Result<Option<juv::CatalogAlias>> {
 
 #[allow(clippy::too_many_arguments)]
 fn merge_alias_common(
-    alias: &juv::CatalogAlias,
+    alias: &jbx::CatalogAlias,
     script: &mut PathBuf,
     extra_deps: &mut Vec<String>,
     extra_repos: &mut Vec<String>,
@@ -1527,7 +1519,7 @@ fn print_catalogs(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_json::Value {
+fn tools_payload(script: &std::path::Path, output: &jbx::BuildOutput) -> serde_json::Value {
     let directives = &output.directives;
     serde_json::json!({
         "originalResource": script.to_string_lossy(),
@@ -1554,16 +1546,6 @@ fn tools_payload(script: &std::path::Path, output: &juv::BuildOutput) -> serde_j
         "enablePreview": directives.enable_preview,
         "enableCds": directives.enable_cds,
         "disableIntegrations": directives.disable_integrations,
-    })
-}
-
-fn run_juvx(cmd: JuvxCommand) -> Result<i32> {
-    juvx::run(juvx::JuvxOptions {
-        coordinate: cmd.coordinate,
-        repos: cmd.repos,
-        cache_dir: cmd.cache_dir,
-        main_class: cmd.main_class,
-        args: cmd.args,
     })
 }
 
@@ -1669,7 +1651,7 @@ fn resolve_formatter_backend(
             cache_dir,
             PALANTIR_GROUP_ID,
             PALANTIR_ARTIFACT_ID,
-            &[juv::resolver::Repository::central()],
+            &[jbx::resolver::Repository::central()],
         )
         .unwrap_or_else(|err| {
             eprintln!(
@@ -1752,9 +1734,9 @@ fn cached_or_downloaded_jar_formatter(
 ) -> Result<FormatterBackend> {
     let cache = cache_root(cache_dir)?.join("deps");
     let coordinate = format!("com.palantir.javaformat:palantir-java-format:{version}");
-    let repos = vec![juv::resolver::Repository::central()];
-    let classpath = juv::resolver::resolve_classpath(&[coordinate], &repos, &cache)?;
-    let java = juv::jdk::java_bin_path(&juv::jdk::resolve_jdk(&None, true)?);
+    let repos = vec![jbx::resolver::Repository::central()];
+    let classpath = jbx::resolver::resolve_classpath(&[coordinate], &repos, &cache)?;
+    let java = jbx::jdk::java_bin_path(&jbx::jdk::resolve_jdk(&None, true)?);
     Ok(FormatterBackend::Jar { java, classpath })
 }
 
@@ -2272,7 +2254,7 @@ fn multipart_boundary() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    format!("juv-central-{}-{nanos}", std::process::id())
+    format!("jbx-central-{}-{nanos}", std::process::id())
 }
 
 fn central_multipart_body(boundary: &str, filename: &str, bundle: &[u8]) -> Result<Vec<u8>> {
@@ -2305,7 +2287,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let descriptor_path = match &cmd.file {
         Some(path) => Some(path.clone()),
         None => {
-            let candidate = PathBuf::from("juv.json");
+            let candidate = PathBuf::from("jbx.json");
             candidate.exists().then_some(candidate)
         }
     };
@@ -2372,7 +2354,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     }
 
     let script =
-        script.ok_or_else(|| anyhow::anyhow!("publish requires a script or juv.json main"))?;
+        script.ok_or_else(|| anyhow::anyhow!("publish requires a script or jbx.json main"))?;
     if !script.exists() {
         anyhow::bail!(
             "publish main source not found: {}{}",
@@ -2442,7 +2424,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
         anyhow::bail!("Maven Central does not accept -SNAPSHOT versions");
     }
     if description.is_none() {
-        description = Some(format!("{} published with juv", coordinates.id));
+        description = Some(format!("{} published with jbx", coordinates.id));
     }
     require_publish_metadata("url", url.as_deref())?;
     if licenses.is_empty() {
@@ -2768,7 +2750,7 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     let target_dir = cmd
         .target_dir
         .clone()
-        .unwrap_or_else(|| PathBuf::from("target/juv-publish"));
+        .unwrap_or_else(|| PathBuf::from("target/jbx-publish"));
     let staging_dir = target_dir.join("staging");
     let repo_dir = target_dir.join("repository");
     if staging_dir.exists() {
@@ -3103,7 +3085,7 @@ fn render_pom_scm(scm: &PublishScm) -> String {
 fn render_pom_dependencies(deps: &[String]) -> Result<String> {
     let parsed = deps
         .iter()
-        .filter_map(|dep| juv::resolver::parse_coordinate(dep).ok())
+        .filter_map(|dep| jbx::resolver::parse_coordinate(dep).ok())
         .collect::<Vec<_>>();
     if parsed.is_empty() {
         return Ok(String::new());
@@ -3188,8 +3170,8 @@ fn write_javadoc_jar(
     }
     fs::create_dir_all(&javadoc_dir)?;
 
-    let jdk_root = juv::jdk::resolve_jdk(&descriptor.java_version, true)?;
-    let javadoc = juv::jdk::javadoc_bin_path(&jdk_root);
+    let jdk_root = jbx::jdk::resolve_jdk(&descriptor.java_version, true)?;
+    let javadoc = jbx::jdk::javadoc_bin_path(&jdk_root);
     let mut cmd = ProcessCommand::new(&javadoc);
     cmd.arg("-quiet")
         .arg("-d")
@@ -3314,12 +3296,12 @@ fn zip_directory(source_dir: &Path, output: &Path) -> Result<()> {
 
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
 
-fn collect_check_directives(files: &[PathBuf]) -> Result<juv::Directives> {
-    let mut directives = juv::Directives::default();
+fn collect_check_directives(files: &[PathBuf]) -> Result<jbx::Directives> {
+    let mut directives = jbx::Directives::default();
     for file in files {
         let source = fs::read_to_string(file)
             .with_context(|| format!("failed to read Java source {}", file.display()))?;
-        let parsed = juv::parse_directives(&source);
+        let parsed = jbx::parse_directives(&source);
         directives.deps.extend(parsed.deps);
         directives.repos.extend(parsed.repos);
         directives.javac_options.extend(parsed.javac_options);
@@ -3366,9 +3348,9 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         directives.java_version = cmd.java_version;
     }
 
-    let jdk_root = juv::jdk::resolve_jdk(&directives.java_version, true)?;
-    let javac = juv::jdk::javac_bin_path(&jdk_root);
-    let java = juv::jdk::java_bin_path(&jdk_root);
+    let jdk_root = jbx::jdk::resolve_jdk(&directives.java_version, true)?;
+    let javac = jbx::jdk::javac_bin_path(&jdk_root);
+    let java = jbx::jdk::java_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
     let wrapper_dir = root.join("compiler-wrapper");
     fs::create_dir_all(&wrapper_dir)?;
@@ -3384,7 +3366,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
             .with_context(|| format!("failed to execute {}", javac.display()))?;
         if !status.success() {
             return Err(anyhow::anyhow!(
-                "failed to compile juv check compiler wrapper with exit code {}",
+                "failed to compile jbx check compiler wrapper with exit code {}",
                 status.code().unwrap_or(1)
             ));
         }
@@ -3402,9 +3384,9 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     let dep_coordinates = directives.deps;
     let mut classpath = cmd.classpath;
     if !dep_coordinates.is_empty() {
-        let repos = juvx::maven_repositories(&directives.repos);
+        let repos = maven_tool::maven_repositories(&directives.repos);
         let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
-        classpath.extend(juv::resolver::resolve_classpath(
+        classpath.extend(jbx::resolver::resolve_classpath(
             &dep_coordinates,
             &repos,
             &cache_dir,
@@ -3428,7 +3410,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         }
         if !has_source_or_release_option(&compiler_options) {
             let release_version =
-                juv::jdk::detect_jdk_major_version(&jdk_root).with_context(|| {
+                jbx::jdk::detect_jdk_major_version(&jdk_root).with_context(|| {
                     format!("could not determine JDK version at {}", jdk_root.display())
                 })?;
             compiler_options.push("--release".to_string());
@@ -3441,14 +3423,14 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
 
     let mut wrapper_classpath = vec![wrapper_dir.clone()];
     if !cmd.no_error_prone {
-        let repos = juvx::maven_repositories(&split_cli_words(&cmd.repos));
+        let repos = maven_tool::maven_repositories(&split_cli_words(&cmd.repos));
         let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
         let error_prone_coordinate = format!(
             "{ERROR_PRONE_GROUP_ID}:{ERROR_PRONE_ARTIFACT_ID}:{}",
             cmd.error_prone_version
         );
         let error_prone_cp =
-            juv::resolver::resolve_classpath(&[error_prone_coordinate], &repos, &cache_dir)?;
+            jbx::resolver::resolve_classpath(&[error_prone_coordinate], &repos, &cache_dir)?;
         wrapper_classpath.extend(error_prone_cp);
         compiler_options.push("-XDcompilePolicy=simple".to_string());
         compiler_options.push("--should-stop=ifError=FLOW".to_string());
@@ -3469,7 +3451,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     }
 
     let payload: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .with_context(|| format!("invalid juv check wrapper output: {stdout}"))?;
+        .with_context(|| format!("invalid jbx check wrapper output: {stdout}"))?;
     print_check_human(&payload)?;
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -3487,7 +3469,7 @@ fn check_java_command<'a>(
     command.args(error_prone_jdk_flags());
     command.arg("-cp").arg(
         std::env::join_paths(wrapper_classpath)
-            .context("failed to build juv check compiler wrapper classpath")?,
+            .context("failed to build jbx check compiler wrapper classpath")?,
     );
     command.arg("JuvCheckCompiler");
     command.args(compiler_options);
@@ -3653,7 +3635,7 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
             cmd.cache_dir.as_deref(),
             JUNIT_GROUP_ID,
             JUNIT_ARTIFACT_ID,
-            &[juv::resolver::Repository::central()],
+            &[jbx::resolver::Repository::central()],
         )
         .unwrap_or_else(|err| {
             eprintln!(
@@ -3717,8 +3699,8 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let mut runtime_cp = vec![build.classes_dir.clone()];
     runtime_cp.extend(build.classpath.clone());
 
-    let jdk_root = juv::jdk::resolve_jdk(&build.directives.java_version, true)?;
-    let java = juv::jdk::java_bin_path(&jdk_root).display().to_string();
+    let jdk_root = jbx::jdk::resolve_jdk(&build.directives.java_version, true)?;
+    let java = jbx::jdk::java_bin_path(&jdk_root).display().to_string();
     let mut java_cmd = ProcessCommand::new(&java);
     for agent in &build.directives.java_agents {
         java_cmd.arg(format_cli_java_agent(agent));
@@ -3765,7 +3747,7 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
 
 fn junit_reports_dir() -> Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    Ok(std::env::temp_dir().join(format!("juv-junit-{}-{nanos}", std::process::id())))
+    Ok(std::env::temp_dir().join(format!("jbx-junit-{}-{nanos}", std::process::id())))
 }
 
 fn read_junit_xml_reports(reports_dir: &Path) -> Result<String> {
@@ -3889,7 +3871,7 @@ fn latest_cached_tool_version(
     cache_dir: Option<&Path>,
     group_id: &str,
     artifact_id: &str,
-    repos: &[juv::resolver::Repository],
+    repos: &[jbx::resolver::Repository],
 ) -> Result<String> {
     let metadata_dir = cache_root(cache_dir)?.join("metadata");
     let cache_file = metadata_dir.join(format!("{group_id}.{artifact_id}.version"));
@@ -3916,10 +3898,10 @@ fn latest_cached_tool_version(
 fn latest_tool_version(
     group_id: &str,
     artifact_id: &str,
-    repos: &[juv::resolver::Repository],
+    repos: &[jbx::resolver::Repository],
 ) -> Result<String> {
-    juv::resolver::resolve_latest_version(
-        &juv::resolver::Module {
+    jbx::resolver::resolve_latest_version(
+        &jbx::resolver::Module {
             org: group_id.to_string(),
             name: artifact_id.to_string(),
         },
@@ -3998,6 +3980,18 @@ fn infer_test_companion_sources(script: &Path) -> Vec<String> {
 fn dedupe_strings(values: &mut Vec<String>) {
     let mut seen = std::collections::HashSet::new();
     values.retain(|value| seen.insert(value.clone()));
+}
+
+fn should_run_as_maven_tool_shorthand(script: &Path) -> bool {
+    if script.exists() {
+        return false;
+    }
+    let value = script.to_string_lossy();
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return false;
+    }
+    let parts: Vec<&str> = value.split(':').collect();
+    matches!(parts.len(), 2..=4) && parts.iter().all(|part| !part.is_empty())
 }
 
 fn main() -> Result<()> {
@@ -4169,7 +4163,7 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Docs(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
-                let directives = juv::parse_directives(&source);
+                let directives = jbx::parse_directives(&source);
                 if let Some(description) = directives.description {
                     println!("{description}");
                 }
@@ -4189,9 +4183,9 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Main(cmd) => {
                 let source = fs::read_to_string(&cmd.script)?;
-                let main = juv::parse_directives(&source)
+                let main = jbx::parse_directives(&source)
                     .main_class
-                    .or_else(|| juv::infer_main_class_from_source(&cmd.script, &source));
+                    .or_else(|| jbx::infer_main_class_from_source(&cmd.script, &source));
                 print_required(main.as_deref(), "could not infer main class; add //MAIN")?;
                 0
             }
@@ -4268,7 +4262,7 @@ fn main() -> Result<()> {
             }
             InfoSubcommand::Directives(cmd) => {
                 let source = std::fs::read_to_string(&cmd.script)?;
-                println!("{:#?}", juv::parse_directives(&source));
+                println!("{:#?}", jbx::parse_directives(&source));
                 0
             }
         },
@@ -4431,12 +4425,12 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let repos = juvx::maven_repositories(&cmd.repos);
+            let repos = maven_tool::maven_repositories(&cmd.repos);
             if cmd.classpath {
-                let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
+                let paths = jbx::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
                 println!("{}", std::env::join_paths(paths)?.to_string_lossy());
             } else {
-                let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
+                let artifacts = jbx::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
                 for artifact in &artifacts {
                     println!("{artifact}");
                 }
@@ -4448,14 +4442,14 @@ fn main() -> Result<()> {
                 Some(path) => path,
                 None => default_cache_dir()?.join("deps"),
             };
-            let repos = juvx::maven_repositories(&cmd.repos);
+            let repos = maven_tool::maven_repositories(&cmd.repos);
             if cmd.deps_only {
-                let artifacts = juv::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
+                let artifacts = jbx::resolver::resolve(&cmd.coordinates, &repos, &cache_dir)?;
                 for artifact in &artifacts {
                     println!("{artifact}");
                 }
             } else {
-                let paths = juv::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
+                let paths = jbx::resolver::resolve_classpath(&cmd.coordinates, &repos, &cache_dir)?;
                 println!("{}", std::env::join_paths(paths)?.to_string_lossy());
             }
             0
@@ -4464,10 +4458,9 @@ fn main() -> Result<()> {
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
-        Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
-                let jdks = juv::jdk::list_jdks()?;
+                let jdks = jbx::jdk::list_jdks()?;
                 if jdks.is_empty() {
                     println!("No JDKs found.");
                 } else {
@@ -4478,39 +4471,49 @@ fn main() -> Result<()> {
                 0
             }
             JdkSubcommand::Install(cmd) => {
-                let version = juv::jdk::parse_java_version_directive(&cmd.version)?;
-                let jdk_root = juv::jdk::install_jdk(version)?;
+                let version = jbx::jdk::parse_java_version_directive(&cmd.version)?;
+                let jdk_root = jbx::jdk::install_jdk(version)?;
                 println!("JDK {} installed to {}", version, jdk_root.display());
                 0
             }
             JdkSubcommand::Home(cmd) => {
-                let version = juv::jdk::parse_java_version_directive(&cmd.version)?;
-                let jdk_root = juv::jdk::find_jdk(version, false)?;
+                let version = jbx::jdk::parse_java_version_directive(&cmd.version)?;
+                let jdk_root = jbx::jdk::find_jdk(version, false)?;
                 println!("{}", jdk_root.display());
                 0
             }
         },
         None => {
             let Some(script) = cli.script else {
-                eprintln!("No script specified. Try: juv run Hello.java");
+                eprintln!("No script or Maven coordinate specified. Try: jbx run Hello.java");
                 std::process::exit(2);
             };
-            run_java(apply_alias_to_run(RunOptions {
-                script,
-                script_args: cli.args,
-                extra_deps: Vec::new(),
-                extra_repos: Vec::new(),
-                extra_sources: Vec::new(),
-                extra_files: Vec::new(),
-                classpath: Vec::new(),
-                javac_options: Vec::new(),
-                runtime_options: Vec::new(),
-                java_agents: Vec::new(),
-                java_version: None,
-                main_class: None,
-                cache_dir: None,
-                trust_remote: false,
-            })?)?
+            if should_run_as_maven_tool_shorthand(&script) {
+                maven_tool::run(maven_tool::MavenToolOptions {
+                    coordinate: script.to_string_lossy().into_owned(),
+                    repos: cli.repos,
+                    cache_dir: cli.cache_dir,
+                    main_class: cli.main_class,
+                    args: cli.args,
+                })?
+            } else {
+                run_java(apply_alias_to_run(RunOptions {
+                    script,
+                    script_args: cli.args,
+                    extra_deps: Vec::new(),
+                    extra_repos: Vec::new(),
+                    extra_sources: Vec::new(),
+                    extra_files: Vec::new(),
+                    classpath: Vec::new(),
+                    javac_options: Vec::new(),
+                    runtime_options: Vec::new(),
+                    java_agents: Vec::new(),
+                    java_version: None,
+                    main_class: None,
+                    cache_dir: None,
+                    trust_remote: false,
+                })?)?
+            }
         }
     };
     std::process::exit(code);
@@ -4579,7 +4582,7 @@ mod test_command_unit_tests {
             Some(tmp.path()),
             "org.junit.platform",
             "junit-platform-console-standalone",
-            &[juv::resolver::Repository {
+            &[jbx::resolver::Repository {
                 id: "offline".to_string(),
                 url: "http://127.0.0.1:9".to_string(),
             }],
@@ -4593,7 +4596,7 @@ mod test_command_unit_tests {
     fn metadata_repo(
         expected_path: &'static str,
         release: &'static str,
-    ) -> (juv::resolver::Repository, std::thread::JoinHandle<()>) {
+    ) -> (jbx::resolver::Repository, std::thread::JoinHandle<()>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
@@ -4615,7 +4618,7 @@ mod test_command_unit_tests {
             std::io::Write::write_all(&mut stream, response.as_bytes()).unwrap();
         });
         (
-            juv::resolver::Repository {
+            jbx::resolver::Repository {
                 id: "test".to_string(),
                 url: format!("http://{addr}"),
             },

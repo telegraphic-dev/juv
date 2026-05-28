@@ -1,10 +1,17 @@
 [package]
-name = "juv"
+name = "jbx"
 version = "0.0.0"
 edition = "2021"
-description = "juv: a Rust port of JBang"
+description = "jbx: one-stop Java toolbox for scripts, tools, and agents"
 repository = "https://github.com/telegraphic-dev/juv"
 license = "MIT"
+
+[lib]
+name = "jbx"
+
+[[bin]]
+name = "jbx"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"

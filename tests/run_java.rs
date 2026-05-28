@@ -2,10 +2,10 @@ use std::fs;
 use std::process::{Command, Output};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
-fn run_juv(args: &[&std::path::Path], text_args: &[&str]) -> Output {
+fn run_jbx(args: &[&std::path::Path], text_args: &[&str]) -> Output {
     let mut cmd = juv_command();
     // GitHub Actions can run several Java processes at once and occasionally
     // emits hsperfdata lock warnings into stdout. Disable shared perfdata so
@@ -37,7 +37,7 @@ class Hello {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &src], &["world"]);
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &["world"]);
 
     assert!(
         out.status.success(),
@@ -67,7 +67,7 @@ public class Packaged {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -105,7 +105,7 @@ class Main {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &main], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &main], &[]);
 
     assert!(
         out.status.success(),
@@ -143,7 +143,7 @@ class Main {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &main], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &main], &[]);
 
     assert!(
         out.status.success(),
@@ -175,7 +175,7 @@ class ReadResource {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -203,7 +203,7 @@ class RuntimeProp {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),
@@ -236,7 +236,7 @@ class PreviewSwitch {
     )
     .unwrap();
 
-    let out = run_juv(&[std::path::Path::new("run"), &src], &[]);
+    let out = run_jbx(&[std::path::Path::new("run"), &src], &[]);
 
     assert!(
         out.status.success(),

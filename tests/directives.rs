@@ -1,4 +1,4 @@
-use juv::{parse_directives, split_directive_words};
+use jbx::{parse_directives, split_directive_words};
 
 #[test]
 fn parses_core_jbang_directives() {

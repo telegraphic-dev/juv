@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -78,7 +78,7 @@ class Helper {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
@@ -107,7 +107,7 @@ class Helper {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--version")
         .arg("2.0.0")
         .arg("--output")
@@ -224,6 +224,65 @@ class Helper {
 }
 
 #[test]
+fn publish_defaults_to_jbx_json_descriptor() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {
+    System.out.println("hello jbx");
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("jbx.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "jbx-tool",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo.jbx",
+  "description": "JBX tool",
+  "url": "https://github.com/telegraphic-dev/jbx-tool",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/jbx-tool.git", "url": "https://github.com/telegraphic-dev/jbx-tool"}
+}
+"#,
+    )
+    .unwrap();
+    let bundle = tmp.path().join("bundle.zip");
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--skip-signing")
+        .arg("--output")
+        .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("dev.telegraphic.demo:jbx-tool:1.0.0"),
+        "{stdout}"
+    );
+    let names = zip_names(&bundle);
+    assert!(
+        names.contains(&"dev/telegraphic/demo/jbx-tool/1.0.0/jbx-tool-1.0.0.pom".to_string()),
+        "{names:?}"
+    );
+}
+
+#[test]
 fn publish_auto_discovers_local_java_sources_when_descriptor_omits_sources() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(
@@ -251,7 +310,7 @@ fn publish_auto_discovers_local_java_sources_when_descriptor_omits_sources() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
@@ -274,7 +333,7 @@ fn publish_auto_discovers_local_java_sources_when_descriptor_omits_sources() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--output")
         .arg(&bundle)
         .arg("--target-dir")
@@ -319,7 +378,7 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo", "id": "safe", "version": "1.0.0",
@@ -344,7 +403,7 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg("juv.json")
+        .arg("jbx.json")
         .arg("--target-dir")
         .arg(".")
         .arg("--cache-dir")
@@ -372,7 +431,7 @@ fn publish_packages_java_compact_source_files() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
@@ -399,7 +458,7 @@ fn publish_packages_java_compact_source_files() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--output")
         .arg(&bundle)
         .arg("--target-dir")
@@ -458,7 +517,7 @@ public class Hello {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
@@ -484,7 +543,7 @@ public class Hello {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--output")
         .arg(&bundle)
         .arg("--target-dir")
@@ -534,7 +593,7 @@ class Helper {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "src/main/java/dev/telegraphic/demo/nested/Hello.java",
   "sources": ["src/main/java/dev/telegraphic/demo/nested/Helper.java"],
@@ -557,7 +616,7 @@ class Helper {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--output")
         .arg(&bundle)
         .arg("--target-dir")
@@ -588,7 +647,7 @@ fn publish_resolves_extensionless_main_from_descriptor_to_java_file() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "group": "com.example",
   "id": "hello",
@@ -611,7 +670,7 @@ fn publish_resolves_extensionless_main_from_descriptor_to_java_file() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--output")
         .arg(&bundle)
         .arg("--target-dir")
@@ -637,7 +696,7 @@ fn publish_resolves_extensionless_main_from_descriptor_to_java_file() {
 fn publish_reports_missing_extensionless_main_with_context() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "group": "com.example",
   "id": "hello",
@@ -659,7 +718,7 @@ fn publish_reports_missing_extensionless_main_with_context() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
@@ -685,7 +744,7 @@ fn publish_rejects_path_unsafe_coordinates() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": ".tmp",
@@ -703,7 +762,7 @@ fn publish_rejects_path_unsafe_coordinates() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg("juv.json")
+        .arg("jbx.json")
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
@@ -729,7 +788,7 @@ fn publish_rejects_path_unsafe_id_and_version_segments() {
         )
         .unwrap();
         fs::write(
-            tmp.path().join("juv.json"),
+            tmp.path().join("jbx.json"),
             format!(
                 r#"{{
   "main": "Hello.java",
@@ -750,7 +809,7 @@ fn publish_rejects_path_unsafe_id_and_version_segments() {
             .arg("publish")
             .arg("--dry-run")
             .arg("--file")
-            .arg("juv.json")
+            .arg("jbx.json")
             .arg("--cache-dir")
             .arg(tmp.path().join("cache"))
             .output()
@@ -767,7 +826,7 @@ fn publish_requires_flat_group_id_version_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{ "main": "Hello.java", "group": "dev.telegraphic", "version": "1.0.0" }"#,
     )
     .unwrap();
@@ -777,7 +836,7 @@ fn publish_requires_flat_group_id_version_metadata() {
         .arg("--dry-run")
         .arg("--skip-signing")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
@@ -914,7 +973,7 @@ fn publish_uploads_signed_bundle_to_maven_central_and_polls_status() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo",
@@ -942,7 +1001,7 @@ fn publish_uploads_signed_bundle_to_maven_central_and_polls_status() {
         .arg("publish")
         .arg("--publish")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
@@ -1010,7 +1069,7 @@ fn publish_requires_central_credentials_before_uploading() {
     )
     .unwrap();
     fs::write(
-        tmp.path().join("juv.json"),
+        tmp.path().join("jbx.json"),
         r#"{
   "main": "Hello.java",
   "group": "dev.telegraphic.demo", "id": "needs-creds", "version": "1.0.0",
@@ -1035,7 +1094,7 @@ fn publish_requires_central_credentials_before_uploading() {
         .arg("publish")
         .arg("--publish")
         .arg("--file")
-        .arg(tmp.path().join("juv.json"))
+        .arg(tmp.path().join("jbx.json"))
         .arg("--target-dir")
         .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn juv_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_juv"))
+    Command::new(env!("CARGO_BIN_EXE_jbx"))
 }
 
 fn assert_success(out: &Output) {
@@ -311,7 +311,7 @@ class Example {}
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("failed to build juv check compiler wrapper classpath"),
+        stderr.contains("failed to build jbx check compiler wrapper classpath"),
         "{stderr}"
     );
     assert!(!stderr.contains("panicked"), "{stderr}");
