@@ -96,7 +96,7 @@ Implemented now:
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
 - `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
-- `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace
+- `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
