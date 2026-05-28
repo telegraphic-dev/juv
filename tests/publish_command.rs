@@ -142,6 +142,22 @@ class Helper {
         "{names:?}"
     );
     assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0-jbx-docs.md")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0-jbx-docs.json")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0-jbx-docs.md.sha256")),
+        "{names:?}"
+    );
+    assert!(
+        names.contains(&format!("{base}/hello-tool-2.0.0-jbx-docs.json.sha256")),
+        "{names:?}"
+    );
+    assert!(
         names.contains(&format!("{base}/hello-tool-2.0.0.pom")),
         "{names:?}"
     );

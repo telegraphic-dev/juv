@@ -56,6 +56,8 @@ enum Commands {
     Build(BuildCommand),
     /// Prepare Maven Central publishing artifacts.
     Publish(PublishCommand),
+    /// Print agent-friendly documentation for source, directories, or Maven artifacts.
+    Docs(DocsCommand),
     /// Check Java source files with javac diagnostics and Error Prone by default.
     Check(CheckCommand),
     /// Initialize a Java script.
@@ -212,6 +214,24 @@ struct BuildCommand {
 
     /// Java source file.
     script: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct DocsCommand {
+    /// Maven GAV, Java source file, docs sidecar, or directory to document.
+    target: String,
+
+    /// Print JSON instead of Markdown.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// Additional repository for remote Maven docs sidecars (id=url format or bare URL).
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Override remote docs cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -1312,6 +1332,271 @@ fn print_required(value: Option<&str>, missing: &str) -> Result<()> {
 fn parsed_directives(script: &PathBuf) -> Result<jbx::Directives> {
     let source = fs::read_to_string(script)?;
     Ok(jbx::parse_directives(&source))
+}
+
+#[derive(Debug, Clone)]
+struct DocsCoordinate {
+    group: String,
+    id: String,
+    version: String,
+}
+
+fn run_docs(cmd: DocsCommand) -> Result<i32> {
+    let target_path = PathBuf::from(&cmd.target);
+    let output = if target_path.exists() {
+        render_local_docs(&target_path, cmd.json)?
+    } else if looks_like_docs_coordinate(&cmd.target) {
+        fetch_remote_docs(&cmd)?
+    } else {
+        anyhow::bail!("docs target not found: {}", cmd.target);
+    };
+    print!("{output}");
+    Ok(0)
+}
+
+fn looks_like_docs_coordinate(value: &str) -> bool {
+    !value.starts_with("http://")
+        && !value.starts_with("https://")
+        && value.split(':').count() == 3
+        && value.split(':').all(|part| !part.is_empty())
+}
+
+fn parse_docs_coordinate(value: &str) -> Result<DocsCoordinate> {
+    let mut parts = value.split(':');
+    let group = parts.next().unwrap_or_default().to_string();
+    let id = parts.next().unwrap_or_default().to_string();
+    let version = parts.next().unwrap_or_default().to_string();
+    if parts.next().is_some() || group.is_empty() || id.is_empty() || version.is_empty() {
+        anyhow::bail!("docs requires Maven coordinates as group:artifact:version");
+    }
+    validate_group(&group)?;
+    validate_path_safe_coordinate_part(&id, "id")?;
+    validate_path_safe_coordinate_part(&version, "version")?;
+    Ok(DocsCoordinate { group, id, version })
+}
+
+fn render_local_docs(path: &Path, json: bool) -> Result<String> {
+    let sources = collect_java_files(&[path.to_path_buf()])?;
+    if sources.is_empty() {
+        anyhow::bail!(
+            "docs target contains no Java source files: {}",
+            path.display()
+        );
+    }
+    let docs = sources
+        .iter()
+        .map(|source| docs_source_json(source, None))
+        .collect::<Result<Vec<_>>>()?;
+    let title = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| path.to_str().unwrap_or("docs"));
+    if json {
+        Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "target": path.to_string_lossy(),
+                "sources": docs,
+            }))?
+        ))
+    } else {
+        render_docs_markdown(title, None, &docs)
+    }
+}
+
+fn docs_source_json(source: &Path, artifact: Option<&DocsCoordinate>) -> Result<serde_json::Value> {
+    let directives = parsed_directives(&source.to_path_buf())?;
+    let name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("source");
+    let docs = directives
+        .docs
+        .iter()
+        .map(|doc| match &doc.value {
+            Some(value) => serde_json::json!({"key": doc.key, "value": value}),
+            None => serde_json::json!({"key": doc.key}),
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "path": source.to_string_lossy(),
+        "name": name,
+        "description": directives.description,
+        "docs": docs,
+        "dependencies": directives.deps,
+        "repositories": directives.repos,
+        "sources": directives.sources,
+        "java": directives.java_version,
+        "main": directives.main_class,
+        "artifact": artifact.map(|coordinate| serde_json::json!({
+            "group": coordinate.group,
+            "id": coordinate.id,
+            "version": coordinate.version,
+            "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+        })),
+    }))
+}
+
+fn render_docs_markdown(
+    title: &str,
+    artifact: Option<&DocsCoordinate>,
+    sources: &[serde_json::Value],
+) -> Result<String> {
+    let mut out = String::new();
+    out.push_str(&format!("# {title}\n\n"));
+    if let Some(coordinate) = artifact {
+        out.push_str(&format!(
+            "Artifact: `{}:{}:{}`\n\n",
+            coordinate.group, coordinate.id, coordinate.version
+        ));
+    }
+    for source in sources {
+        let name = source
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("source");
+        if sources.len() > 1 || artifact.is_some() {
+            out.push_str(&format!("## {name}\n\n"));
+        }
+        if let Some(description) = source.get("description").and_then(|value| value.as_str()) {
+            out.push_str(description);
+            out.push_str("\n\n");
+        }
+        if let Some(docs) = source.get("docs").and_then(|value| value.as_array()) {
+            for doc in docs {
+                let key = doc
+                    .get("key")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default();
+                match doc.get("value").and_then(|value| value.as_str()) {
+                    Some(value) => out.push_str(&format!("- {key}: {value}\n")),
+                    None => out.push_str(&format!("- {key}\n")),
+                }
+            }
+            if !docs.is_empty() {
+                out.push('\n');
+            }
+        }
+        if let Some(deps) = source
+            .get("dependencies")
+            .and_then(|value| value.as_array())
+        {
+            if !deps.is_empty() {
+                out.push_str("Dependencies:\n");
+                for dep in deps.iter().filter_map(|value| value.as_str()) {
+                    out.push_str(&format!("- `{dep}`\n"));
+                }
+                out.push('\n');
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn fetch_remote_docs(cmd: &DocsCommand) -> Result<String> {
+    let coordinate = parse_docs_coordinate(&cmd.target)?;
+    let extension = if cmd.json { "json" } else { "md" };
+    let filename = format!(
+        "{}-{}-jbx-docs.{extension}",
+        coordinate.id, coordinate.version
+    );
+    let cache_root = cmd
+        .cache_dir
+        .clone()
+        .unwrap_or(default_cache_dir()?)
+        .join("docs");
+    let cache_path = cache_root
+        .join(coordinate.group.replace('.', "/"))
+        .join(&coordinate.id)
+        .join(&coordinate.version)
+        .join(&filename);
+    if cache_path.exists() {
+        return fs::read_to_string(&cache_path)
+            .with_context(|| format!("failed to read cached docs {}", cache_path.display()));
+    }
+    let repos = docs_repositories(&cmd.repos);
+    for repo in repos {
+        let url = docs_artifact_url(&repo, &coordinate, &filename);
+        match ureq::get(&url).call() {
+            Ok(response) => {
+                let text = response
+                    .into_string()
+                    .with_context(|| format!("failed to read docs sidecar from {url}"))?;
+                if let Some(parent) = cache_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&cache_path, &text)?;
+                return Ok(text);
+            }
+            Err(ureq::Error::Status(404, _)) => continue,
+            Err(_) => continue,
+        }
+    }
+    anyhow::bail!(
+        "jbx docs sidecar not found for {}:{}:{} ({filename})",
+        coordinate.group,
+        coordinate.id,
+        coordinate.version
+    );
+}
+
+fn docs_repositories(repo_args: &[String]) -> Vec<jbx::resolver::Repository> {
+    let mut repos = maven_tool::maven_repositories(repo_args);
+    repos.sort_by_key(|repo| if repo.id == "central" { 1 } else { 0 });
+    repos
+}
+
+fn docs_artifact_url(
+    repo: &jbx::resolver::Repository,
+    coordinate: &DocsCoordinate,
+    filename: &str,
+) -> String {
+    format!(
+        "{}/{}/{}/{}/{}",
+        repo.url.trim_end_matches('/'),
+        coordinate.group.replace('.', "/"),
+        coordinate.id,
+        coordinate.version,
+        filename
+    )
+}
+
+fn publish_docs_outputs(
+    descriptor: &PublishDescriptor,
+    staged: &StagedPublishSources,
+) -> Result<(String, String)> {
+    let coordinate = DocsCoordinate {
+        group: descriptor.coordinates.group.clone(),
+        id: descriptor.coordinates.id.clone(),
+        version: descriptor.coordinates.version.clone(),
+    };
+    let sources = staged
+        .all_sources
+        .iter()
+        .map(|source| docs_source_json(source, Some(&coordinate)))
+        .collect::<Result<Vec<_>>>()?;
+    let title = descriptor
+        .name
+        .as_deref()
+        .unwrap_or(&descriptor.coordinates.id);
+    let markdown = render_docs_markdown(title, Some(&coordinate), &sources)?;
+    let json = serde_json::to_string_pretty(&serde_json::json!({
+        "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+        "artifact": {
+            "group": coordinate.group,
+            "id": coordinate.id,
+            "version": coordinate.version,
+            "coordinate": format!("{}:{}:{}", coordinate.group, coordinate.id, coordinate.version),
+        },
+        "summary": descriptor.description,
+        "sources": sources,
+        "generatedFrom": {
+            "source": "jbx publish",
+            "jbxVersion": env!("CARGO_PKG_VERSION"),
+        }
+    }))?;
+    Ok((markdown, format!("{json}\n")))
 }
 
 fn print_cache_path(cache_dir: Option<PathBuf>) -> Result<()> {
@@ -2802,7 +3087,19 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
     )?;
     let pom = artifact_dir.join(format!("{prefix}.pom"));
     fs::write(&pom, render_pom(descriptor)?)?;
-    for file in [&jar, &sources_jar, &javadoc_jar, &pom] {
+    let (docs_markdown, docs_json) = publish_docs_outputs(descriptor, &staged)?;
+    let docs_md = artifact_dir.join(format!("{prefix}-jbx-docs.md"));
+    fs::write(&docs_md, docs_markdown)?;
+    let docs_json_path = artifact_dir.join(format!("{prefix}-jbx-docs.json"));
+    fs::write(&docs_json_path, docs_json)?;
+    for file in [
+        &jar,
+        &sources_jar,
+        &javadoc_jar,
+        &pom,
+        &docs_md,
+        &docs_json_path,
+    ] {
         write_checksums(file)?;
         if !cmd.skip_signing {
             write_gpg_signature(file, cmd.gpg_key.as_deref())?;
@@ -4455,6 +4752,7 @@ fn main() -> Result<()> {
             0
         }
         Some(Commands::Publish(cmd)) => run_publish(cmd)?,
+        Some(Commands::Docs(cmd)) => run_docs(cmd)?,
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
