@@ -2305,9 +2305,71 @@ fn extract_javadoc_type_description(html: &str) -> Option<String> {
     patterns.iter().find_map(|pattern| {
         let re = regex::Regex::new(pattern).ok()?;
         let html = re.captures(html)?.get(1)?.as_str();
-        let text = normalize_doc_text(&strip_html_tags(html));
-        (!text.is_empty()).then_some(text)
+        let markdown = html_fragment_to_markdown(html);
+        (!markdown.is_empty()).then_some(markdown)
     })
+}
+
+fn html_fragment_to_markdown(input: &str) -> String {
+    let markdown = quick_html2md::html_to_markdown(&html_unescape(input));
+    normalize_markdown_text(&markdown)
+}
+
+fn normalize_markdown_text(input: &str) -> String {
+    let mut out = String::new();
+    let mut blank_lines = 0;
+    let mut in_fence = false;
+    for raw_line in input.lines() {
+        let line = raw_line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+            out.push('\n');
+            in_fence = !in_fence;
+            blank_lines = 0;
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if trimmed.is_empty() {
+            blank_lines += 1;
+            if blank_lines <= 1 && !out.trim().is_empty() && !out.ends_with("\n\n") {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            continue;
+        }
+        blank_lines = 0;
+        if is_markdown_block_line(trimmed) {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(trimmed);
+            out.push('\n');
+        } else {
+            if !out.is_empty() && !out.ends_with(['\n', ' ']) {
+                out.push(' ');
+            }
+            out.push_str(trimmed);
+        }
+    }
+    out.trim().to_string()
+}
+
+fn is_markdown_block_line(line: &str) -> bool {
+    line.starts_with("#")
+        || line.starts_with(">")
+        || line.starts_with("- ")
+        || line.starts_with("* ")
+        || regex::Regex::new(r#"^\d+\.\s"#).unwrap().is_match(line)
 }
 
 fn strip_html_tags(input: &str) -> String {
@@ -6135,20 +6197,20 @@ mod test_command_unit_tests {
         let html = r#"
             <div class="description">
               <pre>public class <span class="typeNameLabel">Example</span></pre>
-              <div class="block">Example reads and writes JSON.
-                <p>It supports <code>tree</code> values.</div>
+              <div class="block"><p>Example reads and writes JSON.
+                It supports <code>tree</code> values.</p></div>
             </div>
             <div class="member-signature">public void run()</div>
         "#;
         let ty = parse_javadoc_type_page("com/example/Example.html", html).unwrap();
         assert_eq!(
             ty["description"],
-            "Example reads and writes JSON. It supports tree values."
+            "Example reads and writes JSON. It supports `tree` values."
         );
 
         let markdown = render_docs_markdown("example", None, &[], &[ty]).unwrap();
         assert!(
-            markdown.contains("Example reads and writes JSON. It supports tree values."),
+            markdown.contains("Example reads and writes JSON. It supports `tree` values."),
             "{markdown}"
         );
     }
@@ -6188,6 +6250,11 @@ String value = example.readValue("{}", String.class);</pre>
 
         assert_eq!(ty["fields"][0]["name"], "COUNT");
         assert_eq!(ty["fields"][0]["type"], "int");
+        assert!(ty["description"].as_str().unwrap().contains("```"));
+        assert!(ty["description"]
+            .as_str()
+            .unwrap()
+            .contains("example.readValue"));
         assert_eq!(ty["examples"].as_array().unwrap().len(), 1);
         assert!(ty["examples"][0]
             .as_str()

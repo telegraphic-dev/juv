@@ -19,6 +19,7 @@ clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 quick-xml = "0.37"
 regex = "1.10"
+quick_html2md = "0.2"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 base64 = "0.22"
 sha1 = "0.10"
