@@ -2056,9 +2056,9 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     if let Some(package_name_override) = &cmd.package_name {
         package_name = Some(package_name_override.clone());
     }
-    validate_coordinate_part(&coordinates.group, "group")?;
-    validate_coordinate_part(&coordinates.name, "name")?;
-    validate_coordinate_part(&coordinates.version, "version")?;
+    validate_group(&coordinates.group)?;
+    validate_path_safe_coordinate_part(&coordinates.name, "name")?;
+    validate_path_safe_coordinate_part(&coordinates.version, "version")?;
     if let Some(package_name) = package_name.as_deref() {
         validate_package_name(package_name)?;
     }
@@ -2115,6 +2115,25 @@ fn string_array(json: &serde_json::Value, name: &str) -> Result<Vec<String>> {
                 .ok_or_else(|| anyhow::anyhow!("{name} must be an array of strings"))
         })
         .collect()
+}
+
+fn validate_group(value: &str) -> Result<()> {
+    validate_coordinate_part(value, "group")?;
+    if value
+        .split('.')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        anyhow::bail!("invalid group: {value}");
+    }
+    Ok(())
+}
+
+fn validate_path_safe_coordinate_part(value: &str, name: &str) -> Result<()> {
+    validate_coordinate_part(value, name)?;
+    if value == "." || value == ".." {
+        anyhow::bail!("invalid {name}: {value}");
+    }
+    Ok(())
 }
 
 fn validate_coordinate_part(value: &str, name: &str) -> Result<()> {

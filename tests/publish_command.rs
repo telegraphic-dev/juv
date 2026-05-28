@@ -72,6 +72,8 @@ public class Hello {
         .arg("2.0.0")
         .arg("--output")
         .arg(&bundle)
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .output()
@@ -188,6 +190,8 @@ fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
         .arg("--dry-run")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .output()
@@ -196,6 +200,94 @@ fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("compact source files"), "{stderr}");
+}
+
+#[test]
+fn publish_rejects_path_unsafe_coordinates() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": ".tmp",
+  "name": "escape",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo.safe"
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("publish")
+        .arg("--dry-run")
+        .arg("--file")
+        .arg("juv.json")
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("invalid group"), "{stderr}");
+}
+
+#[test]
+fn publish_rejects_path_unsafe_name_and_version_segments() {
+    for (field, value) in [("name", "."), ("version", "..")] {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("Hello.java"),
+            r#"public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("juv.json"),
+            format!(
+                r#"{{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "name": "{}",
+  "version": "{}",
+  "package": "dev.telegraphic.demo.safe"
+}}
+"#,
+                if field == "name" { value } else { "safe" },
+                if field == "version" { value } else { "1.0.0" }
+            ),
+        )
+        .unwrap();
+
+        let out = juv_command()
+            .current_dir(tmp.path())
+            .arg("publish")
+            .arg("--dry-run")
+            .arg("--file")
+            .arg("juv.json")
+            .arg("--cache-dir")
+            .arg(tmp.path().join("cache"))
+            .output()
+            .unwrap();
+
+        assert!(!out.status.success(), "{field}={value}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(&format!("invalid {field}")), "{stderr}");
+    }
 }
 
 #[test]
@@ -213,6 +305,8 @@ fn publish_requires_flat_group_name_version_metadata() {
         .arg("--dry-run")
         .arg("--file")
         .arg(tmp.path().join("juv.json"))
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
         .arg("--cache-dir")
         .arg(tmp.path().join("cache"))
         .output()
