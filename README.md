@@ -2,7 +2,9 @@
 
 `jbx` is a Rust-native Java toolbox: JBang-compatible script running, Maven tool execution, testing, formatting, publishing, cache management, and JDK handling behind one CLI.
 
-The repository name is still `telegraphic-dev/juv`, but the installable command is `jbx` to avoid the existing `juv` package name clash and to make room for both `juv`-style scripts and `juvx`-style executable Maven tools.
+```bash
+jbx <GAV|script.java> [args...]
+```
 
 This repository is intentionally aiming for JBang compatibility rather than inventing a new script format.
 
@@ -43,8 +45,7 @@ Implemented now:
 - `jbx info main|java|description|gav|module <script.java>`
 - `jbx info deps|repos|sources|files <script.java>`
 - `jbx info compile-options|runtime-options|native-options|javaagents|manifest <script.java>`
-- `jbx <script.java> [args...]` JBang-style shorthand
-- `jbx <GAV> -- [args...]` executable Maven tool shorthand, replacing the separate `juvx` command shape
+- `jbx <GAV|script.java> [args...]` run a Java script or Maven executable tool
 - `jbx --main <class> <GAV> -- [args...]` run a main class with the resolved classpath
 - directive parsing for:
   - `//JAVA`
