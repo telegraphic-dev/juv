@@ -1438,10 +1438,11 @@ fn format_cli_java_agent(agent: &KeyValue) -> String {
 }
 
 const DEFAULT_PALANTIR_JAVA_FORMAT_VERSION: &str = "2.91.0";
-const PALANTIR_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 const PALANTIR_GROUP_PATH: &str = "com/palantir/javaformat";
 const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
+const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
+const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -1526,7 +1527,12 @@ fn resolve_formatter_backend(
     }
     let version = match version {
         Some(version) => version.to_string(),
-        None => latest_cached_palantir_java_format_version(cache_dir).unwrap_or_else(|err| {
+        None => latest_tool_version(
+            PALANTIR_GROUP_ID,
+            PALANTIR_ARTIFACT_ID,
+            &[juv::resolver::Repository::central()],
+        )
+        .unwrap_or_else(|err| {
             eprintln!(
                 "warning: could not determine latest Palantir Java Format version: {err:#}; using {DEFAULT_PALANTIR_JAVA_FORMAT_VERSION}"
             );
@@ -1618,42 +1624,6 @@ fn cache_root(cache_dir: Option<&Path>) -> Result<PathBuf> {
         Some(path) => path.to_path_buf(),
         None => default_cache_dir()?,
     })
-}
-
-fn latest_cached_palantir_java_format_version(cache_dir: Option<&Path>) -> Result<String> {
-    let root = cache_root(cache_dir)?;
-    let metadata_dir = root.join("metadata");
-    let cache_file = metadata_dir.join("palantir-java-format.version");
-    if let Ok(metadata) = fs::metadata(&cache_file) {
-        if let Ok(modified) = metadata.modified() {
-            if SystemTime::now()
-                .duration_since(modified)
-                .map(|age| age.as_secs() < PALANTIR_VERSION_CACHE_MAX_AGE_SECS)
-                .unwrap_or(false)
-            {
-                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
-                if !cached.is_empty() {
-                    return Ok(cached);
-                }
-            }
-        }
-    }
-    let xml = ureq::get(
-        "https://repo1.maven.org/maven2/com/palantir/javaformat/palantir-java-format/maven-metadata.xml",
-    )
-    .call()
-    .context("failed to fetch Palantir Java Format Maven metadata")?
-    .into_string()
-    .context("failed to read Palantir Java Format Maven metadata")?;
-    let version = xml_tag(&xml, "release")
-        .or_else(|| xml_tag(&xml, "latest"))
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("Palantir Java Format Maven metadata did not include release/latest")
-        })?;
-    fs::create_dir_all(&metadata_dir)?;
-    fs::write(&cache_file, format!("{version}\n"))?;
-    Ok(version)
 }
 
 fn format_one_file(backend: &FormatterBackend, file: &Path, check: bool) -> Result<bool> {
@@ -1859,12 +1829,18 @@ fn unwrap_compact_source(formatted: &str) -> Result<String> {
 }
 
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
-const JUNIT_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+const JUNIT_GROUP_ID: &str = "org.junit.platform";
+const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
 
 fn run_tests(cmd: TestCommand) -> Result<i32> {
     let junit_version = match cmd.junit_version.clone() {
         Some(version) => version,
-        None => latest_cached_junit_platform_version(cmd.cache_dir.as_deref()).unwrap_or_else(|err| {
+        None => latest_tool_version(
+            JUNIT_GROUP_ID,
+            JUNIT_ARTIFACT_ID,
+            &[juv::resolver::Repository::central()],
+        )
+        .unwrap_or_else(|err| {
             eprintln!(
                 "warning: could not determine latest JUnit Platform Console Standalone version: {err:#}; using {DEFAULT_JUNIT_PLATFORM_VERSION}"
             );
@@ -2082,52 +2058,18 @@ fn xml_attr(attrs: &str, name: &str) -> Option<String> {
     None
 }
 
-fn latest_cached_junit_platform_version(cache_dir: Option<&Path>) -> Result<String> {
-    let root = match cache_dir {
-        Some(path) => path.to_path_buf(),
-        None => default_cache_dir()?,
-    };
-    let metadata_dir = root.join("metadata");
-    let cache_file = metadata_dir.join("junit-platform-console-standalone.version");
-    if let Ok(metadata) = fs::metadata(&cache_file) {
-        if let Ok(modified) = metadata.modified() {
-            if SystemTime::now()
-                .duration_since(modified)
-                .map(|age| age.as_secs() < JUNIT_VERSION_CACHE_MAX_AGE_SECS)
-                .unwrap_or(false)
-            {
-                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
-                if !cached.is_empty() {
-                    return Ok(cached);
-                }
-            }
-        }
-    }
-
-    let xml = ureq::get(
-        "https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/maven-metadata.xml",
+fn latest_tool_version(
+    group_id: &str,
+    artifact_id: &str,
+    repos: &[juv::resolver::Repository],
+) -> Result<String> {
+    juv::resolver::resolve_latest_version(
+        &juv::resolver::Module {
+            org: group_id.to_string(),
+            name: artifact_id.to_string(),
+        },
+        repos,
     )
-    .call()
-    .context("failed to fetch JUnit Platform Maven metadata")?
-    .into_string()
-    .context("failed to read JUnit Platform Maven metadata")?;
-    let version = xml_tag(&xml, "release")
-        .or_else(|| xml_tag(&xml, "latest"))
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("JUnit Platform Maven metadata did not include release/latest")
-        })?;
-    fs::create_dir_all(&metadata_dir)?;
-    fs::write(&cache_file, format!("{version}\n"))?;
-    Ok(version)
-}
-
-fn xml_tag(xml: &str, tag: &str) -> Option<String> {
-    let start = format!("<{tag}>");
-    let end = format!("</{tag}>");
-    let value_start = xml.find(&start)? + start.len();
-    let value_end = xml[value_start..].find(&end)? + value_start;
-    Some(xml[value_start..value_end].trim().to_string())
 }
 
 fn expand_test_target(path: &Path) -> Result<(PathBuf, Vec<String>)> {
@@ -2729,5 +2671,67 @@ mod test_command_unit_tests {
             Some("[1] display name with spaces")
         );
         assert_eq!(xml_attr(attrs, "classname").as_deref(), Some("ExampleTest"));
+    }
+
+    #[test]
+    fn junit_default_version_uses_resolver_latest_metadata() {
+        let (repo, handle) = metadata_repo(
+            "org/junit/platform/junit-platform-console-standalone/maven-metadata.xml",
+            "6.2.0",
+        );
+        let version = latest_tool_version(
+            "org.junit.platform",
+            "junit-platform-console-standalone",
+            &[repo],
+        )
+        .unwrap();
+        handle.join().unwrap();
+        assert_eq!(version, "6.2.0");
+    }
+
+    #[test]
+    fn palantir_default_version_uses_resolver_latest_metadata() {
+        let (repo, handle) = metadata_repo(
+            "com/palantir/javaformat/palantir-java-format/maven-metadata.xml",
+            "2.92.0",
+        );
+        let version =
+            latest_tool_version("com.palantir.javaformat", "palantir-java-format", &[repo])
+                .unwrap();
+        handle.join().unwrap();
+        assert_eq!(version, "2.92.0");
+    }
+
+    fn metadata_repo(
+        expected_path: &'static str,
+        release: &'static str,
+    ) -> (juv::resolver::Repository, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 2048];
+            let read = std::io::Read::read(&mut stream, &mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(
+                request.starts_with(&format!("GET /{expected_path} ")),
+                "{request}"
+            );
+            let body = format!(
+                r#"<metadata><versioning><latest>{release}</latest><release>{release}</release><versions><version>{release}</version></versions></versioning></metadata>"#
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/xml\r\nConnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            std::io::Write::write_all(&mut stream, response.as_bytes()).unwrap();
+        });
+        (
+            juv::resolver::Repository {
+                id: "test".to_string(),
+                url: format!("http://{addr}"),
+            },
+            handle,
+        )
     }
 }
