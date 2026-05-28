@@ -2,6 +2,8 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde_json::Value;
 use std::fs;
+use std::io::{BufRead, Write};
+use std::path::Path;
 use std::process::{Command, Output};
 
 fn juv_command() -> Command {
@@ -20,6 +22,89 @@ fn assert_success(out: &Output) {
 
 fn with_junit_version(command: &mut Command) -> &mut Command {
     command.arg("--junit-version").arg("6.1.0")
+}
+
+fn compile_greeter_jar(root: &Path) -> Vec<u8> {
+    let lib_src_dir = root.join("libsrc/com/example");
+    let lib_classes = root.join("libclasses");
+    fs::create_dir_all(&lib_src_dir).unwrap();
+    fs::create_dir_all(&lib_classes).unwrap();
+    let lib_src = lib_src_dir.join("Greeter.java");
+    fs::write(
+        &lib_src,
+        r#"
+package com.example;
+public class Greeter {
+  public static String message() { return "deps-ok"; }
+}
+"#,
+    )
+    .unwrap();
+    let javac = Command::new("javac")
+        .arg("--release")
+        .arg("8")
+        .arg("-d")
+        .arg(&lib_classes)
+        .arg(&lib_src)
+        .output()
+        .unwrap();
+    assert_success(&javac);
+
+    let jar_path = root.join("greeter-1.0.0.jar");
+    let jar = Command::new("jar")
+        .arg("--create")
+        .arg("--file")
+        .arg(&jar_path)
+        .arg("-C")
+        .arg(&lib_classes)
+        .arg(".")
+        .output()
+        .unwrap();
+    assert_success(&jar);
+    fs::read(jar_path).unwrap()
+}
+
+fn serve_files(files: std::collections::HashMap<&'static str, Vec<u8>>) -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let files = files.clone();
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                if reader.read_line(&mut request).is_err() {
+                    return;
+                }
+                let path = request.split_whitespace().nth(1).unwrap_or("/");
+                while {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap_or(0) > 0 && line != "\r\n"
+                } {}
+                match files.get(path) {
+                    Some(body) => {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(body);
+                    }
+                    None => {
+                        let body = b"not found";
+                        let header = format!(
+                            "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(body);
+                    }
+                }
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}")
 }
 
 fn assert_well_formed_xml(xml: &str) {
@@ -317,6 +402,73 @@ class OtherTest {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("CalculatorTest"), "stdout was {stdout}");
     assert!(stdout.contains("OtherTest"), "stdout was {stdout}");
+}
+
+#[test]
+fn test_directory_target_merges_dependency_directives_from_companion_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let jar = compile_greeter_jar(tmp.path());
+    let repo = serve_files(std::collections::HashMap::from([
+        (
+            "/com/example/greeter/1.0.0/greeter-1.0.0.pom",
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>greeter</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+</project>"#
+                .to_vec(),
+        ),
+        ("/com/example/greeter/1.0.0/greeter-1.0.0.jar", jar),
+    ]));
+    fs::write(
+        tmp.path().join("App.java"),
+        format!(
+            r#"
+//REPOS local={repo}
+//DEPS com.example:greeter:1.0.0
+import com.example.Greeter;
+
+class App {{
+  static String message() {{
+    return Greeter.message();
+  }}
+}}
+"#
+        ),
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("AppTest.java"),
+        r#"
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+class AppTest {
+  @Test
+  void usesDependencyFromCompanionSource() {
+    assertEquals("deps-ok", App.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = with_junit_version(juv_command().arg("test"))
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("usesDependencyFromCompanionSource"),
+        "stdout was {stdout}"
+    );
 }
 
 #[test]
