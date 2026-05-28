@@ -43,8 +43,61 @@ class Example {
 
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["ok"], true);
     assert!(stdout.contains("ReferenceEquality"), "{stdout}");
     assert!(stdout.contains("Example.java"), "{stdout}");
+}
+
+#[test]
+fn check_json_escapes_diagnostic_paths_and_messages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let src = tmp.path().join("quote\"backslash\\dir");
+    fs::create_dir(&src).unwrap();
+    let source = src.join("Weird\"Name.java");
+    fs::write(
+        &source,
+        r#"
+class WeirdName {
+  String broken() {
+    return "bad\q";
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--no-error-prone")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let diagnostic = payload["diagnostics"].as_array().unwrap().first().unwrap();
+    assert!(
+        diagnostic["file"]
+            .as_str()
+            .unwrap()
+            .contains("Weird\"Name.java"),
+        "{stdout}"
+    );
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .unwrap()
+            .contains("illegal escape character"),
+        "{stdout}"
+    );
 }
 
 #[test]
