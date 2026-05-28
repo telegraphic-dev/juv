@@ -1534,6 +1534,7 @@ fn render_docs_markdown(
                     out.push_str("\n\n");
                 }
             }
+            render_examples_section(&mut out, ty.get("examples"));
             render_member_section(&mut out, "Fields", ty.get("fields"), render_field_signature);
             render_member_section(
                 &mut out,
@@ -1550,6 +1551,26 @@ fn render_docs_markdown(
         }
     }
     Ok(out)
+}
+
+fn render_examples_section(out: &mut String, value: Option<&serde_json::Value>) {
+    let Some(examples) = value.and_then(|value| value.as_array()) else {
+        return;
+    };
+    let examples = examples
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    if examples.is_empty() {
+        return;
+    }
+    out.push_str("### Examples\n\n");
+    for example in examples {
+        out.push_str("```java\n");
+        out.push_str(example.trim());
+        out.push_str("\n```\n\n");
+    }
 }
 
 fn render_member_section(
@@ -1776,6 +1797,7 @@ struct DocsTypeBuilder {
     modifiers: Vec<String>,
     annotations: Vec<serde_json::Value>,
     description: Option<String>,
+    examples: Vec<String>,
     extends: Option<String>,
     implements: Vec<String>,
     fields: Vec<serde_json::Value>,
@@ -1802,6 +1824,7 @@ impl DocsTypeBuilder {
             "modifiers": self.modifiers,
             "annotations": self.annotations,
             "description": self.description,
+            "examples": self.examples,
             "extends": self.extends,
             "implements": self.implements,
             "fields": self.fields,
@@ -1870,6 +1893,7 @@ fn parse_type_declaration(
         modifiers,
         annotations,
         description: None,
+        examples: Vec::new(),
         extends,
         implements,
         fields: Vec::new(),
@@ -2160,6 +2184,7 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
     };
     let signatures = extract_javadoc_signatures(html);
     let description = extract_javadoc_type_description(html);
+    let examples = extract_javadoc_examples(html);
     let mut builder = DocsTypeBuilder {
         kind: kind.to_string(),
         name: name.clone(),
@@ -2169,6 +2194,7 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
         modifiers: vec!["public".to_string()],
         annotations: Vec::new(),
         description,
+        examples,
         extends: None,
         implements: Vec::new(),
         fields: Vec::new(),
@@ -2211,6 +2237,7 @@ fn extract_javadoc_signatures(html: &str) -> Vec<String> {
 }
 
 fn is_javadoc_member_signature(text: &str) -> bool {
+    let text = strip_leading_annotation_lines(text);
     let tokens = split_java_words(text);
     if tokens.is_empty() {
         return false;
@@ -2221,6 +2248,53 @@ fn is_javadoc_member_signature(text: &str) -> bool {
     !tokens
         .iter()
         .any(|token| matches!(token.as_str(), "class" | "interface" | "enum" | "record"))
+}
+
+fn is_javadoc_type_signature(text: &str) -> bool {
+    split_java_words(strip_leading_annotation_lines(text))
+        .iter()
+        .any(|token| matches!(token.as_str(), "class" | "interface" | "enum" | "record"))
+}
+
+fn strip_leading_annotation_lines(text: &str) -> &str {
+    let mut rest = text.trim();
+    while rest.starts_with('@') {
+        let Some((_, tail)) = rest.split_once(char::is_whitespace) else {
+            return "";
+        };
+        rest = tail.trim_start();
+    }
+    rest
+}
+
+fn extract_javadoc_examples(html: &str) -> Vec<String> {
+    let pre = regex::Regex::new(r#"(?s)<pre[^>]*>(.*?)</pre>"#).unwrap();
+    let mut examples = Vec::new();
+    for example in pre
+        .captures_iter(html)
+        .filter_map(|captures| captures.get(1))
+        .map(|example| normalize_code_block(&strip_html_tags(example.as_str())))
+    {
+        let normalized = normalize_doc_text(&example);
+        if !example.is_empty()
+            && !is_javadoc_member_signature(&normalized)
+            && !is_javadoc_type_signature(&normalized)
+            && !examples.contains(&example)
+        {
+            examples.push(example);
+        }
+    }
+    examples
+}
+
+fn normalize_code_block(input: &str) -> String {
+    input
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }
 
 fn extract_javadoc_type_description(html: &str) -> Option<String> {
@@ -2342,6 +2416,7 @@ fn parse_javap_type(output: &str) -> Option<serde_json::Value> {
         modifiers: parse_modifiers(&tokens[..kind_index]),
         annotations: Vec::new(),
         description: None,
+        examples: Vec::new(),
         extends: None,
         implements: Vec::new(),
         fields: Vec::new(),
@@ -6083,7 +6158,10 @@ mod test_command_unit_tests {
         let html = r#"
             <div class="description">
               <pre>public class <span class="typeNameLabel">Example</span></pre>
-              <div class="block">Useful example.</div>
+              <div class="block">Useful example.
+                <pre>Example example = new Example("demo", Map.of());
+String value = example.readValue("{}", String.class);</pre>
+              </div>
             </div>
             <ul class="blockList">
               <li class="blockList">
@@ -6110,6 +6188,11 @@ mod test_command_unit_tests {
 
         assert_eq!(ty["fields"][0]["name"], "COUNT");
         assert_eq!(ty["fields"][0]["type"], "int");
+        assert_eq!(ty["examples"].as_array().unwrap().len(), 1);
+        assert!(ty["examples"][0]
+            .as_str()
+            .unwrap()
+            .contains("example.readValue"));
 
         assert_eq!(ty["constructors"][0]["name"], "Example");
         assert_eq!(ty["constructors"][0]["parameters"][0]["name"], "name");
@@ -6140,12 +6223,18 @@ mod test_command_unit_tests {
             "name": "Example",
             "qualifiedName": "com.example.Example",
             "description": "Useful example.",
+            "examples": ["Example example = new Example(\"demo\");\nString value = example.readValue(\"{}\");"],
             "fields": [{"name": "COUNT", "type": "int", "modifiers": ["public", "static", "final"]}],
             "constructors": [{"name": "Example", "parameters": [{"name": "name", "type": "String"}], "throws": ["IOException"]}],
             "methods": [{"name": "readValue", "returnType": "T", "parameters": [{"name": "content", "type": "String"}], "throws": ["IOException"]}]
         });
         let markdown = render_docs_markdown("example", None, &[], &[ty]).unwrap();
 
+        assert!(markdown.contains("### Examples"), "{markdown}");
+        assert!(
+            markdown.contains("String value = example.readValue"),
+            "{markdown}"
+        );
         assert!(markdown.contains("### Fields"), "{markdown}");
         assert!(
             markdown.contains("- `public static final int COUNT`"),
