@@ -1994,7 +1994,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         compiler_options.push("-Xplugin:ErrorProne".to_string());
     }
 
-    let output = check_java_command(&java, &wrapper_classpath, &compiler_options, &files)
+    let output = check_java_command(&java, &wrapper_classpath, &compiler_options, &files)?
         .output()
         .with_context(|| format!("failed to execute {}", java.display()))?;
 
@@ -2021,18 +2021,18 @@ fn check_java_command<'a>(
     wrapper_classpath: &'a [PathBuf],
     compiler_options: &'a [String],
     files: &'a [PathBuf],
-) -> ProcessCommand {
+) -> Result<ProcessCommand> {
     let mut command = ProcessCommand::new(java);
     command.args(error_prone_jdk_flags());
     command.arg("-cp").arg(
         std::env::join_paths(wrapper_classpath)
-            .expect("wrapper classpath should contain valid paths"),
+            .context("failed to build juv check compiler wrapper classpath")?,
     );
     command.arg("JuvCheckCompiler");
     command.args(compiler_options);
     command.arg("--");
     command.args(files);
-    command
+    Ok(command)
 }
 
 fn error_prone_jdk_flags() -> [&'static str; 10] {

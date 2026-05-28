@@ -101,6 +101,38 @@ class WeirdName {
 }
 
 #[test]
+fn check_reports_invalid_wrapper_classpath_without_panic() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache:with-colon");
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        r#"
+class Example {}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("failed to build juv check compiler wrapper classpath"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+#[test]
 fn check_supports_directories_and_no_error_prone() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache");
