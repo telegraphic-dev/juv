@@ -1751,7 +1751,7 @@ fn cache_project_dir(cache_dir: Option<&Path>, script: &Path, source: &str) -> R
 }
 
 fn looks_like_binary_dependency(dep: &str) -> bool {
-    dep.matches(':').count() >= 2 && !dep.ends_with(".java")
+    dep.matches(':').count() >= 1 && !dep.ends_with(".java")
 }
 
 fn resolve_dependencies(
