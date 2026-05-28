@@ -34,7 +34,7 @@ fn zip_entry(path: &std::path::Path, name: &str) -> String {
 }
 
 #[test]
-fn publish_dry_run_uses_juv_json_gav_object_and_version_override() {
+fn publish_dry_run_uses_flat_package_metadata_and_version_override() {
     let tmp = tempfile::tempdir().unwrap();
     let script = tmp.path().join("Hello.java");
     fs::write(
@@ -52,11 +52,9 @@ public class Hello {
         tmp.path().join("juv.json"),
         r#"{
   "main": "Hello.java",
-  "gav": {
-    "group": "dev.telegraphic.demo",
-    "artifact": "hello-tool",
-    "version": "1.0.0"
-  },
+  "group": "dev.telegraphic.demo",
+  "name": "hello-tool",
+  "version": "1.0.0",
   "package": "dev.telegraphic.demo.hello",
   "description": "Hello tool"
 }
@@ -139,7 +137,7 @@ fn publish_target_dir_dot_does_not_delete_unrelated_files() {
         tmp.path().join("juv.json"),
         r#"{
   "main": "Hello.java",
-  "gav": { "group": "dev.telegraphic.demo", "artifact": "safe", "version": "1.0.0" },
+  "group": "dev.telegraphic.demo", "name": "safe", "version": "1.0.0",
   "package": "dev.telegraphic.demo.safe"
 }
 "#,
@@ -178,7 +176,7 @@ fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
         tmp.path().join("juv.json"),
         r#"{
   "main": "Hello.java",
-  "gav": { "group": "dev.telegraphic.demo", "artifact": "compact", "version": "1.0.0" },
+  "group": "dev.telegraphic.demo", "name": "compact", "version": "1.0.0",
   "package": "dev.telegraphic.demo.compact"
 }
 "#,
@@ -201,12 +199,12 @@ fn publish_rejects_compact_source_instead_of_injecting_illegal_package() {
 }
 
 #[test]
-fn publish_requires_structured_gav_metadata() {
+fn publish_requires_flat_group_name_version_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("Hello.java"), "void main() {}\n").unwrap();
     fs::write(
         tmp.path().join("juv.json"),
-        r#"{ "main": "Hello.java", "gav": "dev.telegraphic:bad:1.0.0" }"#,
+        r#"{ "main": "Hello.java", "group": "dev.telegraphic", "version": "1.0.0" }"#,
     )
     .unwrap();
 
@@ -222,5 +220,5 @@ fn publish_requires_structured_gav_metadata() {
 
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("gav must be an object"), "{stderr}");
+    assert!(stderr.contains("name is required"), "{stderr}");
 }

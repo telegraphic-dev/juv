@@ -208,7 +208,7 @@ struct PublishCommand {
     #[arg(long = "file")]
     file: Option<PathBuf>,
 
-    /// Override gav.version from juv.json or //GAV.
+    /// Override version from juv.json or //GAV.
     #[arg(long = "version")]
     version: Option<String>,
 
@@ -1943,16 +1943,16 @@ fn unwrap_compact_source(formatted: &str) -> Result<String> {
 }
 
 #[derive(Debug, Clone)]
-struct PublishGav {
+struct PublishCoordinates {
     group: String,
-    artifact: String,
+    name: String,
     version: String,
 }
 
 #[derive(Debug, Clone)]
 struct PublishDescriptor {
     script: PathBuf,
-    gav: PublishGav,
+    coordinates: PublishCoordinates,
     package_name: Option<String>,
     description: Option<String>,
     java_version: Option<String>,
@@ -1970,9 +1970,9 @@ fn run_publish(cmd: PublishCommand) -> Result<i32> {
     let bundle = prepare_publish_bundle(&descriptor, &cmd)?;
     println!(
         "prepared Maven Central dry run bundle for {}:{}:{} at {}",
-        descriptor.gav.group,
-        descriptor.gav.artifact,
-        descriptor.gav.version,
+        descriptor.coordinates.group,
+        descriptor.coordinates.name,
+        descriptor.coordinates.version,
         bundle.display()
     );
     Ok(0)
@@ -1988,7 +1988,7 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     };
 
     let mut script = cmd.script.clone();
-    let mut gav = None;
+    let mut coordinates = None;
     let mut package_name = None;
     let mut description = None;
     let mut java_version = None;
@@ -2006,8 +2006,11 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
                 script = Some(base_dir.join(main));
             }
         }
-        if let Some(value) = json.get("gav") {
-            gav = Some(parse_descriptor_gav(value)?);
+        if json.get("group").is_some()
+            || json.get("name").is_some()
+            || json.get("version").is_some()
+        {
+            coordinates = Some(parse_descriptor_coordinates(&json)?);
         }
         package_name = json
             .get("package")
@@ -2028,9 +2031,9 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     let script =
         script.ok_or_else(|| anyhow::anyhow!("publish requires a script or juv.json main"))?;
     let directives = parsed_directives(&script)?;
-    if gav.is_none() {
+    if coordinates.is_none() {
         if let Some(raw) = directives.gav.as_deref() {
-            gav = Some(parse_gav_string(raw)?);
+            coordinates = Some(parse_gav_directive(raw)?);
         }
     }
     if description.is_none() {
@@ -2045,22 +2048,23 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     if repos.is_empty() {
         repos = directives.repos.clone();
     }
-    let mut gav = gav.ok_or_else(|| anyhow::anyhow!("publish requires gav metadata"))?;
+    let mut coordinates = coordinates
+        .ok_or_else(|| anyhow::anyhow!("publish requires group, name, and version metadata"))?;
     if let Some(version) = &cmd.version {
-        gav.version = version.clone();
+        coordinates.version = version.clone();
     }
     if let Some(package_name_override) = &cmd.package_name {
         package_name = Some(package_name_override.clone());
     }
-    validate_gav_part(&gav.group, "gav.group")?;
-    validate_gav_part(&gav.artifact, "gav.artifact")?;
-    validate_gav_part(&gav.version, "gav.version")?;
+    validate_coordinate_part(&coordinates.group, "group")?;
+    validate_coordinate_part(&coordinates.name, "name")?;
+    validate_coordinate_part(&coordinates.version, "version")?;
     if let Some(package_name) = package_name.as_deref() {
         validate_package_name(package_name)?;
     }
     Ok(PublishDescriptor {
         script,
-        gav,
+        coordinates,
         package_name,
         description,
         java_version,
@@ -2069,31 +2073,28 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     })
 }
 
-fn parse_descriptor_gav(value: &serde_json::Value) -> Result<PublishGav> {
-    let obj = value.as_object().ok_or_else(|| {
-        anyhow::anyhow!("gav must be an object with group, artifact, and version")
-    })?;
+fn parse_descriptor_coordinates(json: &serde_json::Value) -> Result<PublishCoordinates> {
     let field = |name: &str| -> Result<String> {
-        obj.get(name)
+        json.get(name)
             .and_then(|value| value.as_str())
             .map(ToOwned::to_owned)
-            .ok_or_else(|| anyhow::anyhow!("gav.{name} is required"))
+            .ok_or_else(|| anyhow::anyhow!("{name} is required"))
     };
-    Ok(PublishGav {
+    Ok(PublishCoordinates {
         group: field("group")?,
-        artifact: field("artifact")?,
+        name: field("name")?,
         version: field("version")?,
     })
 }
 
-fn parse_gav_string(raw: &str) -> Result<PublishGav> {
+fn parse_gav_directive(raw: &str) -> Result<PublishCoordinates> {
     let parts = raw.split(':').collect::<Vec<_>>();
     if parts.len() != 3 {
         anyhow::bail!("//GAV must have group:artifact:version");
     }
-    Ok(PublishGav {
+    Ok(PublishCoordinates {
         group: parts[0].to_string(),
-        artifact: parts[1].to_string(),
+        name: parts[1].to_string(),
         version: parts[2].to_string(),
     })
 }
@@ -2116,7 +2117,7 @@ fn string_array(json: &serde_json::Value, name: &str) -> Result<Vec<String>> {
         .collect()
 }
 
-fn validate_gav_part(value: &str, name: &str) -> Result<()> {
+fn validate_coordinate_part(value: &str, name: &str) -> Result<()> {
     if value.is_empty()
         || value
             .chars()
@@ -2179,12 +2180,15 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
         trust_remote: false,
     })?;
 
-    let base_rel = PathBuf::from(descriptor.gav.group.replace('.', "/"))
-        .join(&descriptor.gav.artifact)
-        .join(&descriptor.gav.version);
+    let base_rel = PathBuf::from(descriptor.coordinates.group.replace('.', "/"))
+        .join(&descriptor.coordinates.name)
+        .join(&descriptor.coordinates.version);
     let artifact_dir = repo_dir.join(&base_rel);
     fs::create_dir_all(&artifact_dir)?;
-    let prefix = format!("{}-{}", descriptor.gav.artifact, descriptor.gav.version);
+    let prefix = format!(
+        "{}-{}",
+        descriptor.coordinates.name, descriptor.coordinates.version
+    );
     let jar = artifact_dir.join(format!("{prefix}.jar"));
     write_directory_jar(&build.classes_dir, &jar)?;
     let sources_jar = artifact_dir.join(format!("{prefix}-sources.jar"));
@@ -2230,8 +2234,8 @@ fn stage_publish_source(descriptor: &PublishDescriptor, staging_dir: &Path) -> R
     let package_name = descriptor.package_name.clone().unwrap_or_else(|| {
         format!(
             "{}.{}",
-            descriptor.gav.group,
-            descriptor.gav.artifact.replace('-', "")
+            descriptor.coordinates.group,
+            descriptor.coordinates.name.replace('-', "")
         )
     });
     if looks_like_compact_source(&source) {
@@ -2272,10 +2276,10 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
   <description>{}</description>
 </project>
 "#,
-        xml_escape(&descriptor.gav.group),
-        xml_escape(&descriptor.gav.artifact),
-        xml_escape(&descriptor.gav.version),
-        xml_escape(&descriptor.gav.artifact),
+        xml_escape(&descriptor.coordinates.group),
+        xml_escape(&descriptor.coordinates.name),
+        xml_escape(&descriptor.coordinates.version),
+        xml_escape(&descriptor.coordinates.name),
         xml_escape(description)
     ))
 }

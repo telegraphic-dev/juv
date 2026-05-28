@@ -32,7 +32,7 @@ Implemented now:
 - `juv export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `juv export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `juv export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
-- `juv publish [script.java] --file juv.json --dry-run` prepares a Maven Central bundle ZIP for class-based Java sources using structured `gav.group`/`gav.artifact`/`gav.version` metadata; `--version` overrides the descriptor version
+- `juv publish [script.java] --file juv.json --dry-run` prepares a Maven Central bundle ZIP for class-based Java sources using flat `group`/`name`/`version` metadata; `--version` overrides the descriptor version
 - `juv info classpath <script.java>`
 - `juv info tools <script.java>` with `--select`
 - `juv info docs <script.java>`
@@ -85,7 +85,7 @@ Implemented now:
 - `juv export local` creates runnable JARs whose manifest classpath points at local dependency paths
 - `juv export portable` creates runnable JARs and copies file-based dependency classpath entries into sibling `lib/`
 - `juv export native` compiles scripts then invokes GraalVM `native-image`, passing `//NATIVE_OPTIONS` plus `--native-option` values
-- `juv publish --dry-run` reads `juv.json`, accepts structured `gav: { group, artifact, version }`, supports `--version` overrides, compiles/stages class-based Java sources, and writes a Maven repository-layout Central bundle with main, sources, javadoc-placeholder, POM, and checksum artifacts
+- `juv publish --dry-run` reads `juv.json`, accepts flat `group` / `name` / `version` metadata, supports `--version` overrides, compiles/stages class-based Java sources, and writes a Maven repository-layout Central bundle with main, sources, javadoc-placeholder, POM, and checksum artifacts
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
 - non-coordinate `//DEPS` treated as source dependencies
@@ -128,6 +128,33 @@ juv check src --no-error-prone --json
 juv run Hello.java world
 # hello world
 ```
+
+### `juv.json` publish descriptor
+
+```json
+{
+  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "group": "dev.telegraphic.demo",
+  "name": "hello-tool",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo",
+  "description": "Small demo tool",
+  "java": "25",
+  "dependencies": [
+    "info.picocli:picocli:4.7.7"
+  ],
+  "repositories": [
+    "https://repo.maven.apache.org/maven2"
+  ]
+}
+```
+
+```bash
+juv publish --file juv.json --dry-run
+juv publish --file juv.json --version 1.0.1 --dry-run
+```
+
+`name` becomes the Maven `artifactId`. `--version` overrides the descriptor version for release/tag workflows.
 
 ## Development
 
