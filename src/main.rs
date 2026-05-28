@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
     time::{SystemTime, UNIX_EPOCH},
@@ -60,6 +61,8 @@ enum Commands {
     Fetch(FetchCommand),
     /// Run JUnit tests with the standalone console launcher.
     Test(TestCommand),
+    /// Format Java source files with Palantir Java Format.
+    Fmt(FmtCommand),
     /// Run an executable JAR resolved from Maven coordinates.
     Juvx(JuvxCommand),
     /// Manage installed JDKs.
@@ -266,6 +269,27 @@ struct TestCommand {
     /// Extra arguments passed to the JUnit ConsoleLauncher after defaults.
     #[arg(trailing_var_arg = true)]
     args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+struct FmtCommand {
+    /// Check formatting without rewriting files.
+    #[arg(long = "check")]
+    check: bool,
+
+    /// Palantir Java Format version to use.
+    ///
+    /// Defaults to the cached latest Maven Central release, refreshed periodically.
+    #[arg(long = "formatter-version")]
+    formatter_version: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Java source files or directories. Defaults to the current directory.
+    #[arg(default_value = ".")]
+    paths: Vec<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -1413,6 +1437,427 @@ fn format_cli_java_agent(agent: &KeyValue) -> String {
     }
 }
 
+const DEFAULT_PALANTIR_JAVA_FORMAT_VERSION: &str = "2.91.0";
+const PALANTIR_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+const PALANTIR_GROUP_PATH: &str = "com/palantir/javaformat";
+const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
+const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
+
+#[derive(Debug, Clone)]
+enum FormatterBackend {
+    Native(PathBuf),
+    Jar {
+        java: PathBuf,
+        classpath: Vec<PathBuf>,
+    },
+}
+
+fn run_fmt(cmd: FmtCommand) -> Result<i32> {
+    let files = collect_java_files(&cmd.paths)?;
+    if files.is_empty() {
+        return Ok(0);
+    }
+    let backend =
+        resolve_formatter_backend(cmd.cache_dir.as_deref(), cmd.formatter_version.as_deref())?;
+    let mut changed = Vec::new();
+    for file in files {
+        if format_one_file(&backend, &file, cmd.check)? {
+            changed.push(file);
+        }
+    }
+    if cmd.check && !changed.is_empty() {
+        for file in &changed {
+            eprintln!("would reformat {}", file.display());
+        }
+        return Ok(1);
+    }
+    Ok(0)
+}
+
+fn collect_java_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for path in paths {
+        if path.is_file() {
+            if is_java_file(path) {
+                files.push(path.clone());
+            }
+            continue;
+        }
+        if path.is_dir() {
+            for entry in walkdir::WalkDir::new(path)
+                .into_iter()
+                .filter_entry(|entry| {
+                    !entry.file_type().is_dir() || !is_ignored_fmt_dir(entry.path())
+                })
+            {
+                let entry = entry.with_context(|| format!("failed to read {}", path.display()))?;
+                let entry_path = entry.path();
+                if entry.file_type().is_file() && is_java_file(entry_path) {
+                    files.push(entry_path.to_path_buf());
+                }
+            }
+            continue;
+        }
+        return Err(anyhow::anyhow!("fmt path not found: {}", path.display()));
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn is_java_file(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("java")
+}
+
+fn is_ignored_fmt_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| matches!(name, ".git" | "target" | "build" | ".gradle" | ".jbang"))
+}
+
+fn resolve_formatter_backend(
+    cache_dir: Option<&Path>,
+    version: Option<&str>,
+) -> Result<FormatterBackend> {
+    if version.is_none() {
+        if let Ok(path) = which::which("palantir-java-format") {
+            return Ok(FormatterBackend::Native(path));
+        }
+    }
+    let version = match version {
+        Some(version) => version.to_string(),
+        None => latest_cached_palantir_java_format_version(cache_dir).unwrap_or_else(|err| {
+            eprintln!(
+                "warning: could not determine latest Palantir Java Format version: {err:#}; using {DEFAULT_PALANTIR_JAVA_FORMAT_VERSION}"
+            );
+            DEFAULT_PALANTIR_JAVA_FORMAT_VERSION.to_string()
+        }),
+    };
+    if let Some(native) = cached_or_downloaded_native_formatter(cache_dir, &version)? {
+        return Ok(FormatterBackend::Native(native));
+    }
+    cached_or_downloaded_jar_formatter(cache_dir, &version)
+}
+
+fn cached_or_downloaded_native_formatter(
+    cache_dir: Option<&Path>,
+    version: &str,
+) -> Result<Option<PathBuf>> {
+    let Some(classifier) = native_formatter_classifier() else {
+        return Ok(None);
+    };
+    let root = cache_root(cache_dir)?
+        .join("formatters")
+        .join("palantir-java-format")
+        .join(version);
+    let bin = root.join(format!("palantir-java-format-{classifier}"));
+    if bin.exists() {
+        return Ok(Some(bin));
+    }
+    fs::create_dir_all(&root)?;
+    let base = format!("https://repo1.maven.org/maven2/{PALANTIR_GROUP_PATH}/palantir-java-format-native/{version}");
+    let artifact = format!("palantir-java-format-native-{version}-nativeImage-{classifier}.bin");
+    let url = format!("{base}/{artifact}");
+    let sha_url = format!("{url}.sha256");
+    let bytes = match ureq::get(&url).call() {
+        Ok(response) => {
+            let mut reader = response.into_reader();
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes)?;
+            bytes
+        }
+        Err(_) => return Ok(None),
+    };
+    let sha_text = ureq::get(&sha_url)
+        .call()
+        .with_context(|| format!("failed to fetch checksum for {url}"))?
+        .into_string()
+        .with_context(|| format!("failed to read checksum for {url}"))?;
+    let expected = sha_text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("empty checksum response for {url}"))?;
+    let actual = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    if actual != expected {
+        return Err(anyhow::anyhow!("checksum mismatch for {url}"));
+    }
+    fs::write(&bin, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&bin)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bin, permissions)?;
+    }
+    Ok(Some(bin))
+}
+
+fn native_formatter_classifier() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => Some("linux-glibc_x86-64"),
+        ("linux", "aarch64") => Some("linux-glibc_aarch64"),
+        ("macos", "aarch64") => Some("macos_aarch64"),
+        _ => None,
+    }
+}
+
+fn cached_or_downloaded_jar_formatter(
+    cache_dir: Option<&Path>,
+    version: &str,
+) -> Result<FormatterBackend> {
+    let cache = cache_root(cache_dir)?.join("deps");
+    let coordinate = format!("com.palantir.javaformat:palantir-java-format:{version}");
+    let repos = vec![juv::resolver::Repository::central()];
+    let classpath = juv::resolver::resolve_classpath(&[coordinate], &repos, &cache)?;
+    let java = juv::jdk::java_bin_path(&juv::jdk::resolve_jdk(&None, true)?);
+    Ok(FormatterBackend::Jar { java, classpath })
+}
+
+fn cache_root(cache_dir: Option<&Path>) -> Result<PathBuf> {
+    Ok(match cache_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_cache_dir()?,
+    })
+}
+
+fn latest_cached_palantir_java_format_version(cache_dir: Option<&Path>) -> Result<String> {
+    let root = cache_root(cache_dir)?;
+    let metadata_dir = root.join("metadata");
+    let cache_file = metadata_dir.join("palantir-java-format.version");
+    if let Ok(metadata) = fs::metadata(&cache_file) {
+        if let Ok(modified) = metadata.modified() {
+            if SystemTime::now()
+                .duration_since(modified)
+                .map(|age| age.as_secs() < PALANTIR_VERSION_CACHE_MAX_AGE_SECS)
+                .unwrap_or(false)
+            {
+                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
+                if !cached.is_empty() {
+                    return Ok(cached);
+                }
+            }
+        }
+    }
+    let xml = ureq::get(
+        "https://repo1.maven.org/maven2/com/palantir/javaformat/palantir-java-format/maven-metadata.xml",
+    )
+    .call()
+    .context("failed to fetch Palantir Java Format Maven metadata")?
+    .into_string()
+    .context("failed to read Palantir Java Format Maven metadata")?;
+    let version = xml_tag(&xml, "release")
+        .or_else(|| xml_tag(&xml, "latest"))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("Palantir Java Format Maven metadata did not include release/latest")
+        })?;
+    fs::create_dir_all(&metadata_dir)?;
+    fs::write(&cache_file, format!("{version}\n"))?;
+    Ok(version)
+}
+
+fn format_one_file(backend: &FormatterBackend, file: &Path, check: bool) -> Result<bool> {
+    let source =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    if is_compact_source(&source) {
+        let formatted = format_compact_source(backend, &source, file)?;
+        let changed = formatted != source;
+        if changed && !check {
+            fs::write(file, formatted)
+                .with_context(|| format!("failed to write {}", file.display()))?;
+        }
+        return Ok(changed);
+    }
+    if check {
+        let output = formatter_command(backend)
+            .arg("--dry-run")
+            .arg("--set-exit-if-changed")
+            .arg(file)
+            .output()
+            .with_context(|| format!("failed to execute formatter for {}", file.display()))?;
+        if output.status.success() {
+            return Ok(false);
+        }
+        if output.status.code() == Some(1) {
+            return Ok(true);
+        }
+        return Err(formatter_error(file, output));
+    }
+    let output = formatter_command(backend)
+        .arg("--replace")
+        .arg(file)
+        .output()
+        .with_context(|| format!("failed to execute formatter for {}", file.display()))?;
+    if !output.status.success() {
+        return Err(formatter_error(file, output));
+    }
+    let updated =
+        fs::read_to_string(file).with_context(|| format!("failed to read {}", file.display()))?;
+    Ok(updated != source)
+}
+
+fn formatter_command(backend: &FormatterBackend) -> ProcessCommand {
+    match backend {
+        FormatterBackend::Native(path) => ProcessCommand::new(path),
+        FormatterBackend::Jar { java, classpath } => {
+            let mut command = ProcessCommand::new(java);
+            command
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED")
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED")
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED")
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED")
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED")
+                .arg("--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED")
+                .arg("-cp")
+                .arg(std::env::join_paths(classpath).unwrap_or_default())
+                .arg(PALANTIR_MAIN_CLASS);
+            command
+        }
+    }
+}
+
+fn formatter_error(file: &Path, output: std::process::Output) -> anyhow::Error {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    anyhow::anyhow!(
+        "formatter failed for {} with exit code {}\n{}{}",
+        file.display(),
+        output.status.code().unwrap_or(1),
+        stdout,
+        stderr
+    )
+}
+
+fn is_compact_source(source: &str) -> bool {
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("void main(") {
+            return true;
+        }
+        if starts_with_java_type_declaration(trimmed) {
+            return false;
+        }
+    }
+    false
+}
+
+fn starts_with_java_type_declaration(trimmed: &str) -> bool {
+    const TYPE_DECLARATION_PREFIXES: &[&str] = &[
+        "class ",
+        "abstract class ",
+        "sealed class ",
+        "non-sealed class ",
+        "final class ",
+        "public class ",
+        "public abstract class ",
+        "public sealed class ",
+        "public non-sealed class ",
+        "public final class ",
+        "record ",
+        "public record ",
+        "interface ",
+        "public interface ",
+        "enum ",
+        "public enum ",
+        "@interface ",
+        "public @interface ",
+    ];
+    TYPE_DECLARATION_PREFIXES
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+}
+
+fn format_compact_source(backend: &FormatterBackend, source: &str, file: &Path) -> Result<String> {
+    let (prefix, body) = split_compact_prefix(source);
+    let indented_body = body
+        .lines()
+        .map(|line| format!("    {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let wrapped = format!("{prefix}class {COMPACT_WRAPPER_CLASS} {{\n{indented_body}\n}}\n");
+    let output = formatter_command(backend)
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(wrapped.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .with_context(|| format!("failed to execute formatter for {}", file.display()))?;
+    if !output.status.success() {
+        return Err(formatter_error(file, output));
+    }
+    let formatted =
+        String::from_utf8(output.stdout).context("formatter emitted non-UTF-8 output")?;
+    unwrap_compact_source(&formatted)
+}
+
+fn split_compact_prefix(source: &str) -> (String, String) {
+    let mut prefix = String::new();
+    let mut body = String::new();
+    let mut in_prefix = true;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if in_prefix
+            && (trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("#!")
+                || trimmed.starts_with("import "))
+        {
+            prefix.push_str(line);
+            prefix.push('\n');
+        } else {
+            in_prefix = false;
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    (prefix, body.trim_end().to_string())
+}
+
+fn unwrap_compact_source(formatted: &str) -> Result<String> {
+    let lines = formatted.lines().collect::<Vec<_>>();
+    let wrapper_index = lines
+        .iter()
+        .position(|line| line.trim() == format!("class {COMPACT_WRAPPER_CLASS} {{"))
+        .ok_or_else(|| anyhow::anyhow!("formatter output did not contain compact wrapper"))?;
+    let wrapper_end = lines
+        .iter()
+        .enumerate()
+        .skip(wrapper_index + 1)
+        .filter_map(|(index, line)| (line.trim() == "}").then_some(index))
+        .next_back()
+        .ok_or_else(|| anyhow::anyhow!("formatter output did not contain compact wrapper end"))?;
+
+    let mut out = String::new();
+    for line in &lines[..wrapper_index] {
+        out.push_str(line);
+        out.push('\n');
+    }
+    let body_lines = &lines[wrapper_index + 1..wrapper_end];
+    let indent = body_lines
+        .iter()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            (!trimmed.is_empty()).then_some(line.len() - trimmed.len())
+        })
+        .min()
+        .unwrap_or(0);
+    for line in body_lines {
+        if line.len() >= indent {
+            out.push_str(&line[indent..]);
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
 const JUNIT_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 
@@ -2219,6 +2664,7 @@ fn main() -> Result<()> {
             0
         }
         Some(Commands::Test(cmd)) => run_tests(cmd)?,
+        Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
         Some(Commands::Juvx(cmd)) => run_juvx(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {

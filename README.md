@@ -26,6 +26,8 @@ Implemented now:
 - `juv catalog add <name> <catalog-path-or-url> [--import]` register an external catalog
 - `juv catalog list [--json]` list external catalogs from the nearest `jbang-catalog.json`
 - `juv run <alias>` / `juv <alias>` run local catalog aliases
+- `juv test [script.java|directory]` run JUnit tests with the standalone console launcher
+- `juv fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
 - `juv export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `juv export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `juv export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
