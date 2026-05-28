@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use base64::Engine;
+use clap::{Parser, Subcommand, ValueEnum};
 use std::{
     fs,
     io::{Read, Write},
@@ -240,9 +241,44 @@ struct PublishCommand {
     #[arg(long = "gpg-key")]
     gpg_key: Option<String>,
 
-    /// Upload/publish to Maven Central. Not enabled until Central API support lands.
+    /// Upload to Maven Central and publish after validation.
     #[arg(long = "publish")]
     publish: bool,
+
+    /// Maven Central Portal publishing type for the upload.
+    #[arg(long = "publishing-type", default_value = "automatic")]
+    publishing_type: CentralPublishingType,
+
+    /// Base URL for Maven Central Portal API.
+    #[arg(long = "central-url", hide = true)]
+    central_url: Option<String>,
+
+    /// Do not poll Central after uploading the deployment bundle.
+    #[arg(long = "no-wait")]
+    no_wait: bool,
+
+    /// Seconds to wait between Central deployment status checks.
+    #[arg(long = "poll-interval", default_value_t = 5, hide = true)]
+    poll_interval: u64,
+
+    /// Maximum seconds to wait for Maven Central publication before exiting.
+    #[arg(long = "max-wait-seconds", default_value_t = 600)]
+    max_wait_seconds: u64,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum CentralPublishingType {
+    Automatic,
+    UserManaged,
+}
+
+impl CentralPublishingType {
+    fn as_query_value(self) -> &'static str {
+        match self {
+            CentralPublishingType::Automatic => "AUTOMATIC",
+            CentralPublishingType::UserManaged => "USER_MANAGED",
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -1998,21 +2034,268 @@ struct PublishDescriptor {
 }
 
 fn run_publish(cmd: PublishCommand) -> Result<i32> {
-    if cmd.publish {
+    if !cmd.publish && !cmd.dry_run {
         anyhow::bail!(
-            "Maven Central upload is not implemented yet; use --dry-run to prepare the bundle"
+            "publish requires --dry-run for local inspection or --publish for Maven Central upload"
         );
+    }
+    if cmd.publish && cmd.skip_signing {
+        anyhow::bail!("--publish requires signed artifacts; remove --skip-signing or use --dry-run for local inspection");
     }
     let descriptor = load_publish_descriptor(&cmd)?;
     let bundle = prepare_publish_bundle(&descriptor, &cmd)?;
-    println!(
-        "prepared Maven Central dry run bundle for {}:{}:{} at {}",
-        descriptor.coordinates.group,
-        descriptor.coordinates.id,
-        descriptor.coordinates.version,
-        bundle.display()
+    if !cmd.publish {
+        println!(
+            "prepared Maven Central dry run bundle for {}:{}:{} at {}",
+            descriptor.coordinates.group,
+            descriptor.coordinates.id,
+            descriptor.coordinates.version,
+            bundle.display()
+        );
+        return Ok(0);
+    }
+    let client = CentralClient::from_command(&cmd)?;
+    let deployment_name = format!(
+        "{}-{}",
+        descriptor.coordinates.id, descriptor.coordinates.version
     );
+    let deployment_id = client.upload_bundle(&bundle, &deployment_name, cmd.publishing_type)?;
+    println!(
+        "uploaded Maven Central deployment {deployment_id} for {}:{}:{}",
+        descriptor.coordinates.group, descriptor.coordinates.id, descriptor.coordinates.version
+    );
+    if cmd.no_wait {
+        println!(
+            "deployment status polling skipped; check Maven Central Portal for {deployment_id}"
+        );
+        return Ok(0);
+    }
+    client.wait_for_publication(
+        &deployment_id,
+        cmd.publishing_type,
+        cmd.poll_interval,
+        cmd.max_wait_seconds,
+    )?;
     Ok(0)
+}
+
+struct CentralClient {
+    base_url: String,
+    authorization: String,
+}
+
+impl CentralClient {
+    fn from_command(cmd: &PublishCommand) -> Result<Self> {
+        let base_url = cmd
+            .central_url
+            .clone()
+            .or_else(|| std::env::var("CENTRAL_PORTAL_URL").ok())
+            .unwrap_or_else(|| "https://central.sonatype.com".to_string());
+        let token = central_bearer_token(cmd)?;
+        Ok(Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            authorization: format!("Bearer {token}"),
+        })
+    }
+
+    fn upload_bundle(
+        &self,
+        bundle: &Path,
+        deployment_name: &str,
+        publishing_type: CentralPublishingType,
+    ) -> Result<String> {
+        let filename = bundle
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("central-bundle.zip");
+        let boundary = multipart_boundary();
+        let body = central_multipart_body(&boundary, filename, &fs::read(bundle)?)?;
+        let url = format!(
+            "{}/api/v1/publisher/upload?name={}&publishingType={}",
+            self.base_url,
+            url_encode(deployment_name),
+            publishing_type.as_query_value()
+        );
+        let response = ureq::post(&url)
+            .set("Authorization", &self.authorization)
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
+            .send_bytes(&body);
+        let text = central_response_text(response, "upload deployment bundle")?;
+        let deployment_id = text.trim();
+        if deployment_id.is_empty() {
+            anyhow::bail!("Maven Central upload succeeded but returned an empty deployment id");
+        }
+        Ok(deployment_id.to_string())
+    }
+
+    fn deployment_status(&self, deployment_id: &str) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/api/v1/publisher/status?id={}",
+            self.base_url,
+            url_encode(deployment_id)
+        );
+        let text = central_response_text(
+            ureq::post(&url)
+                .set("Authorization", &self.authorization)
+                .call(),
+            "read deployment status",
+        )?;
+        serde_json::from_str(&text)
+            .with_context(|| format!("invalid Maven Central status response: {text}"))
+    }
+
+    fn publish_deployment(&self, deployment_id: &str) -> Result<()> {
+        let url = format!(
+            "{}/api/v1/publisher/deployment/{}",
+            self.base_url,
+            url_encode(deployment_id)
+        );
+        central_response_text(
+            ureq::post(&url)
+                .set("Authorization", &self.authorization)
+                .call(),
+            "publish validated deployment",
+        )?;
+        Ok(())
+    }
+
+    fn wait_for_publication(
+        &self,
+        deployment_id: &str,
+        publishing_type: CentralPublishingType,
+        poll_interval: u64,
+        max_wait_seconds: u64,
+    ) -> Result<()> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(max_wait_seconds);
+        let mut manual_publish_started = publishing_type == CentralPublishingType::Automatic;
+        loop {
+            let status = self.deployment_status(deployment_id)?;
+            let state = status
+                .get("deploymentState")
+                .and_then(|value| value.as_str())
+                .unwrap_or("UNKNOWN");
+            println!("Maven Central deployment {deployment_id}: {state}");
+            match state {
+                "PUBLISHED" => {
+                    if let Some(purls) = status.get("purls").and_then(|value| value.as_array()) {
+                        for purl in purls.iter().filter_map(|value| value.as_str()) {
+                            println!("published {purl}");
+                        }
+                    }
+                    return Ok(());
+                }
+                "FAILED" => {
+                    anyhow::bail!(
+                        "Maven Central deployment {deployment_id} failed: {}",
+                        status
+                    );
+                }
+                "VALIDATED" if !manual_publish_started => {
+                    self.publish_deployment(deployment_id)?;
+                    manual_publish_started = true;
+                }
+                "PENDING" | "VALIDATING" | "VALIDATED" | "PUBLISHING" => {}
+                _ => anyhow::bail!(
+                    "unknown Maven Central deployment state for {deployment_id}: {state}"
+                ),
+            }
+            if std::time::Instant::now() >= deadline {
+                anyhow::bail!("timed out waiting for Maven Central deployment {deployment_id} after {max_wait_seconds}s");
+            }
+            if poll_interval > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(poll_interval));
+            }
+        }
+    }
+}
+
+fn central_bearer_token(_cmd: &PublishCommand) -> Result<String> {
+    if let Some(token) = first_env(&[
+        "CENTRAL_PORTAL_TOKEN",
+        "CENTRAL_TOKEN",
+        "MAVEN_CENTRAL_TOKEN",
+        "SONATYPE_TOKEN",
+    ]) {
+        return Ok(token);
+    }
+    let username = first_env(&[
+        "CENTRAL_TOKEN_USERNAME",
+        "CENTRAL_PORTAL_USERNAME",
+        "CENTRAL_USERNAME",
+        "MAVEN_CENTRAL_USERNAME",
+        "SONATYPE_USERNAME",
+    ]);
+    let password = first_env(&[
+        "CENTRAL_TOKEN_PASSWORD",
+        "CENTRAL_PORTAL_PASSWORD",
+        "CENTRAL_PASSWORD",
+        "MAVEN_CENTRAL_PASSWORD",
+        "SONATYPE_PASSWORD",
+    ]);
+    match (username, password) {
+        (Some(username), Some(password)) => Ok(base64::engine::general_purpose::STANDARD
+            .encode(format!("{username}:{password}"))),
+        _ => anyhow::bail!(
+            "Maven Central publishing requires CENTRAL_PORTAL_TOKEN or CENTRAL_TOKEN_USERNAME/CENTRAL_TOKEN_PASSWORD"
+        ),
+    }
+}
+
+fn first_env(names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| std::env::var(name).ok())
+}
+
+fn central_response_text(
+    response: std::result::Result<ureq::Response, ureq::Error>,
+    operation: &str,
+) -> Result<String> {
+    match response {
+        Ok(response) => response
+            .into_string()
+            .with_context(|| format!("failed to read Maven Central response for {operation}")),
+        Err(ureq::Error::Status(code, response)) => {
+            let body = response.into_string().unwrap_or_default();
+            anyhow::bail!("Maven Central {operation} failed with HTTP {code}: {body}");
+        }
+        Err(err) => Err(anyhow::anyhow!("Maven Central {operation} failed: {err}")),
+    }
+}
+
+fn multipart_boundary() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("juv-central-{}-{nanos}", std::process::id())
+}
+
+fn central_multipart_body(boundary: &str, filename: &str, bundle: &[u8]) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    write!(body, "--{boundary}\r\n")?;
+    write!(
+        body,
+        "Content-Disposition: form-data; name=\"bundle\"; filename=\"{}\"\r\n",
+        filename.replace('\"', "%22")
+    )?;
+    write!(body, "Content-Type: application/octet-stream\r\n\r\n")?;
+    body.extend_from_slice(bundle);
+    write!(body, "\r\n--{boundary}--\r\n")?;
+    Ok(body)
+}
+
+fn url_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }
 
 fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {

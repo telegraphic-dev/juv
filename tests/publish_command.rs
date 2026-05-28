@@ -1,5 +1,8 @@
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::{Command, Output};
+use std::sync::{Arc, Mutex};
 
 fn juv_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_juv"))
@@ -785,4 +788,280 @@ fn publish_requires_flat_group_id_version_metadata() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("id is required"), "{stderr}");
+}
+
+#[derive(Default, Debug)]
+struct RecordedCentralRequests {
+    upload: Option<String>,
+    status: Option<String>,
+}
+
+fn start_mock_central(states: Vec<&'static str>) -> (String, Arc<Mutex<RecordedCentralRequests>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let recorded = Arc::new(Mutex::new(RecordedCentralRequests::default()));
+    let recorded_thread = Arc::clone(&recorded);
+    std::thread::spawn(move || {
+        let mut statuses = states.into_iter();
+        for stream in listener.incoming().take(1 + statuses.len()) {
+            let mut stream = stream.unwrap();
+            let request = read_http_request(&mut stream);
+            let first_line = request.lines().next().unwrap_or_default().to_string();
+            if first_line.starts_with("POST /api/v1/publisher/upload") {
+                recorded_thread.lock().unwrap().upload = Some(request);
+                write!(
+                    stream,
+                    "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\ndeployment-42"
+                )
+                .unwrap();
+            } else if first_line.starts_with("POST /api/v1/publisher/status") {
+                recorded_thread.lock().unwrap().status = Some(request);
+                let state = statuses.next().unwrap_or("PUBLISHED");
+                let body = format!(
+                    r#"{{"deploymentId":"deployment-42","deploymentState":"{state}","purls":["pkg:maven/dev.telegraphic.demo/uploaded@1.0.0"]}}"#
+                );
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            } else {
+                recorded_thread.lock().unwrap().status = Some(request);
+                write!(
+                    stream,
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+            }
+        }
+    });
+    (url, recorded)
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+    let mut bytes = Vec::new();
+    let mut buf = [0; 1024];
+    loop {
+        let read = stream.read(&mut buf).unwrap();
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buf[..read]);
+        if let Some(header_end) = find_header_end(&bytes) {
+            let headers = String::from_utf8_lossy(&bytes[..header_end]).to_string();
+            let content_length = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length: "))
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            let body_start = header_end + 4;
+            while bytes.len().saturating_sub(body_start) < content_length {
+                let read = stream.read(&mut buf).unwrap();
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buf[..read]);
+            }
+            break;
+        }
+    }
+    String::from_utf8_lossy(&bytes).to_string()
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn fake_gpg_path(tmp: &tempfile::TempDir) -> std::path::PathBuf {
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let gpg = bin.join("gpg");
+    fs::write(
+        &gpg,
+        r#"#!/usr/bin/env sh
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output" ]; then
+    out="$arg"
+    break
+  fi
+  prev="$arg"
+done
+printf 'fake-signature' > "$out"
+"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&gpg, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    bin
+}
+
+#[test]
+fn publish_uploads_signed_bundle_to_maven_central_and_polls_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        r#"public class Hello {
+  public static void main(String[] args) {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo",
+  "id": "uploaded",
+  "version": "1.0.0",
+  "package": "dev.telegraphic.demo.uploaded",
+  "description": "Uploaded tool",
+  "url": "https://github.com/telegraphic-dev/uploaded",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/uploaded.git", "url": "https://github.com/telegraphic-dev/uploaded"}
+}
+"#,
+    )
+    .unwrap();
+    let (central_url, recorded) = start_mock_central(vec!["PUBLISHED"]);
+    let fake_bin = fake_gpg_path(&tmp);
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--publish")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--central-url")
+        .arg(central_url)
+        .arg("--poll-interval")
+        .arg("0")
+        .arg("--max-wait-seconds")
+        .arg("5")
+        .env("PATH", path)
+        .env("CENTRAL_TOKEN_USERNAME", "user")
+        .env("CENTRAL_TOKEN_PASSWORD", "pass")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("uploaded Maven Central deployment deployment-42"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Maven Central deployment deployment-42: PUBLISHED"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("pkg:maven/dev.telegraphic.demo/uploaded@1.0.0"),
+        "{stdout}"
+    );
+    let recorded = recorded.lock().unwrap();
+    let upload = recorded.upload.as_ref().unwrap();
+    assert!(
+        upload.starts_with(
+            "POST /api/v1/publisher/upload?name=uploaded-1.0.0&publishingType=AUTOMATIC HTTP/1.1"
+        ),
+        "{upload}"
+    );
+    assert!(
+        upload.contains("Authorization: Bearer dXNlcjpwYXNz"),
+        "{upload}"
+    );
+    assert!(
+        upload.contains("Content-Type: multipart/form-data; boundary="),
+        "{upload}"
+    );
+    assert!(
+        upload.contains("name=\"bundle\"; filename=\"uploaded-1.0.0-central-bundle.zip\""),
+        "{upload}"
+    );
+    assert!(upload.contains("uploaded-1.0.0.jar.asc"), "{upload}");
+    let status = recorded.status.as_ref().unwrap();
+    assert!(
+        status.starts_with("POST /api/v1/publisher/status?id=deployment-42 HTTP/1.1"),
+        "{status}"
+    );
+}
+
+#[test]
+fn publish_requires_central_credentials_before_uploading() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Hello.java"),
+        "public class Hello { public static void main(String[] args) {} }\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("juv.json"),
+        r#"{
+  "main": "Hello.java",
+  "group": "dev.telegraphic.demo", "id": "needs-creds", "version": "1.0.0",
+  "package": "dev.telegraphic.demo.creds",
+  "description": "Needs credentials",
+  "url": "https://github.com/telegraphic-dev/needs-creds",
+  "licenses": [{"name": "MIT License", "url": "https://opensource.org/licenses/MIT"}],
+  "developers": [{"name": "Telegraphic"}],
+  "scm": {"connection": "scm:git:https://github.com/telegraphic-dev/needs-creds.git", "url": "https://github.com/telegraphic-dev/needs-creds"}
+}
+"#,
+    )
+    .unwrap();
+    let fake_bin = fake_gpg_path(&tmp);
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let out = juv_command()
+        .arg("publish")
+        .arg("--publish")
+        .arg("--file")
+        .arg(tmp.path().join("juv.json"))
+        .arg("--target-dir")
+        .arg(tmp.path().join("publish-target"))
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .env("PATH", path)
+        .env_remove("CENTRAL_PORTAL_TOKEN")
+        .env_remove("CENTRAL_TOKEN")
+        .env_remove("MAVEN_CENTRAL_TOKEN")
+        .env_remove("SONATYPE_TOKEN")
+        .env_remove("CENTRAL_TOKEN_USERNAME")
+        .env_remove("CENTRAL_TOKEN_PASSWORD")
+        .env_remove("CENTRAL_PORTAL_USERNAME")
+        .env_remove("CENTRAL_PORTAL_PASSWORD")
+        .env_remove("CENTRAL_USERNAME")
+        .env_remove("CENTRAL_PASSWORD")
+        .env_remove("MAVEN_CENTRAL_USERNAME")
+        .env_remove("MAVEN_CENTRAL_PASSWORD")
+        .env_remove("SONATYPE_USERNAME")
+        .env_remove("SONATYPE_PASSWORD")
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("Maven Central publishing requires CENTRAL_PORTAL_TOKEN"),
+        "{stderr}"
+    );
 }

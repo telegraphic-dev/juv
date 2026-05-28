@@ -664,6 +664,7 @@ name = "juv"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "dirs",
  "flate2",
