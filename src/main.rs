@@ -1904,6 +1904,33 @@ fn unwrap_compact_source(formatted: &str) -> Result<String> {
 
 const DEFAULT_JUNIT_PLATFORM_VERSION: &str = "6.1.0";
 
+fn collect_check_directives(files: &[PathBuf]) -> Result<juv::Directives> {
+    let mut directives = juv::Directives::default();
+    for file in files {
+        let source = fs::read_to_string(file)
+            .with_context(|| format!("failed to read Java source {}", file.display()))?;
+        let parsed = juv::parse_directives(&source);
+        directives.deps.extend(parsed.deps);
+        directives.repos.extend(parsed.repos);
+        directives.javac_options.extend(parsed.javac_options);
+        if directives.java_version.is_none() {
+            directives.java_version = parsed.java_version;
+        }
+        directives.enable_preview |= parsed.enable_preview;
+    }
+    Ok(directives)
+}
+
+fn has_source_or_release_option(options: &[String]) -> bool {
+    options.iter().any(|option| {
+        matches!(
+            option.as_str(),
+            "--source" | "-source" | "--release" | "-release"
+        ) || option.starts_with("--source=")
+            || option.starts_with("--release=")
+    })
+}
+
 fn run_check(cmd: CheckCommand) -> Result<i32> {
     let files = collect_java_files(&cmd.paths)?;
     if files.is_empty() {
@@ -1921,7 +1948,15 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         return Ok(0);
     }
 
-    let jdk_root = juv::jdk::resolve_jdk(&cmd.java_version, true)?;
+    let mut directives = collect_check_directives(&files)?;
+    directives.deps.extend(split_cli_words(&cmd.deps));
+    directives.repos.extend(split_cli_words(&cmd.repos));
+    directives.javac_options.extend(cmd.javac_options);
+    if cmd.java_version.is_some() {
+        directives.java_version = cmd.java_version;
+    }
+
+    let jdk_root = juv::jdk::resolve_jdk(&directives.java_version, true)?;
     let javac = juv::jdk::javac_bin_path(&jdk_root);
     let java = juv::jdk::java_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
@@ -1954,10 +1989,10 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     compiler_options.push("-d".to_string());
     compiler_options.push(classes_dir.to_string_lossy().to_string());
 
-    let dep_coordinates = split_cli_words(&cmd.deps);
+    let dep_coordinates = directives.deps;
     let mut classpath = cmd.classpath;
     if !dep_coordinates.is_empty() {
-        let repos = juvx::maven_repositories(&split_cli_words(&cmd.repos));
+        let repos = juvx::maven_repositories(&directives.repos);
         let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
         classpath.extend(juv::resolver::resolve_classpath(
             &dep_coordinates,
@@ -1973,7 +2008,23 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
                 .to_string(),
         );
     }
-    compiler_options.extend(cmd.javac_options);
+    compiler_options.extend(directives.javac_options);
+    if directives.enable_preview {
+        if !compiler_options
+            .iter()
+            .any(|option| option == "--enable-preview")
+        {
+            compiler_options.push("--enable-preview".to_string());
+        }
+        if !has_source_or_release_option(&compiler_options) {
+            let release_version =
+                juv::jdk::detect_jdk_major_version(&jdk_root).with_context(|| {
+                    format!("could not determine JDK version at {}", jdk_root.display())
+                })?;
+            compiler_options.push("--release".to_string());
+            compiler_options.push(release_version.to_string());
+        }
+    }
     if cmd.warnings_as_errors {
         compiler_options.push("-Werror".to_string());
     }
