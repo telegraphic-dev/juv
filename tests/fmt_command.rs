@@ -171,7 +171,7 @@ fn fmt_wraps_compact_source_before_formatting_and_unwraps_afterwards() {
     let source = tmp.path().join("hello.java");
     fs::write(
         &source,
-        "//JAVA 25+\n//DEPS com.example:demo:1.0\nvoid main(){IO.println(\"hi\");}\n",
+        "//JAVA 25+\n//DEPS com.example:demo:1.0\nimport java.util.List;\nvoid main(){IO.println(\"hi\");}\n",
     )
     .unwrap();
 
@@ -187,7 +187,8 @@ fn fmt_wraps_compact_source_before_formatting_and_unwraps_afterwards() {
     assert_success(&out);
     let formatted = fs::read_to_string(&source).unwrap();
     assert!(
-        formatted.starts_with("// JAVA 25+\n// DEPS com.example:demo:1.0\n"),
+        formatted
+            .starts_with("// JAVA 25+\n// DEPS com.example:demo:1.0\nimport java.util.List;\n"),
         "{formatted}"
     );
     assert!(

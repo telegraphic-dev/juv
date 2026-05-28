@@ -1776,7 +1776,10 @@ fn split_compact_prefix(source: &str) -> (String, String) {
     for line in source.lines() {
         let trimmed = line.trim_start();
         if in_prefix
-            && (trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("#!"))
+            && (trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("#!")
+                || trimmed.starts_with("import "))
         {
             prefix.push_str(line);
             prefix.push('\n');
