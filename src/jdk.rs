@@ -650,6 +650,15 @@ pub fn javac_bin_path(jdk_root: &Path) -> PathBuf {
     }
 }
 
+/// Get the javadoc binary path for a JDK root.
+pub fn javadoc_bin_path(jdk_root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        jdk_root.join("bin").join("javadoc.exe")
+    } else {
+        jdk_root.join("bin").join("javadoc")
+    }
+}
+
 /// Remove a stale cache entry that is not a valid JDK root.
 fn remove_stale_cache_entry(path: &Path) -> anyhow::Result<()> {
     if path.is_symlink() || path.is_file() {
