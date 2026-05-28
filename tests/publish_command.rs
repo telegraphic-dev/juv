@@ -56,7 +56,8 @@ public class Hello {
   "name": "hello-tool",
   "version": "1.0.0",
   "package": "dev.telegraphic.demo.hello",
-  "description": "Hello tool"
+  "description": "Hello tool",
+  "dependencies": ["info.picocli:picocli:4.7.7"]
 }
 "#,
     )
@@ -121,6 +122,10 @@ public class Hello {
         pom.contains("<description>Hello tool</description>"),
         "{pom}"
     );
+    assert!(pom.contains("<dependencies>"), "{pom}");
+    assert!(pom.contains("<groupId>info.picocli</groupId>"), "{pom}");
+    assert!(pom.contains("<artifactId>picocli</artifactId>"), "{pom}");
+    assert!(pom.contains("<version>4.7.7</version>"), "{pom}");
 }
 
 #[test]

@@ -2284,6 +2284,7 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
         .description
         .as_deref()
         .unwrap_or("Published with juv");
+    let dependencies = render_pom_dependencies(&descriptor.deps)?;
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -2292,15 +2293,51 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
   <artifactId>{}</artifactId>
   <version>{}</version>
   <name>{}</name>
-  <description>{}</description>
+  <description>{}</description>{}
 </project>
 "#,
         xml_escape(&descriptor.coordinates.group),
         xml_escape(&descriptor.coordinates.name),
         xml_escape(&descriptor.coordinates.version),
         xml_escape(&descriptor.coordinates.name),
-        xml_escape(description)
+        xml_escape(description),
+        dependencies
     ))
+}
+
+fn render_pom_dependencies(deps: &[String]) -> Result<String> {
+    let parsed = deps
+        .iter()
+        .filter_map(|dep| juv::resolver::parse_coordinate(dep).ok())
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        return Ok(String::new());
+    }
+    let mut out = String::from("\n  <dependencies>");
+    for dep in parsed {
+        out.push_str("\n    <dependency>");
+        out.push_str(&format!(
+            "\n      <groupId>{}</groupId>",
+            xml_escape(&dep.module.org)
+        ));
+        out.push_str(&format!(
+            "\n      <artifactId>{}</artifactId>",
+            xml_escape(&dep.module.name)
+        ));
+        out.push_str(&format!(
+            "\n      <version>{}</version>",
+            xml_escape(&dep.version)
+        ));
+        if let Some(classifier) = dep.classifier.as_deref() {
+            out.push_str(&format!(
+                "\n      <classifier>{}</classifier>",
+                xml_escape(classifier)
+            ));
+        }
+        out.push_str("\n    </dependency>");
+    }
+    out.push_str("\n  </dependencies>");
+    Ok(out)
 }
 
 fn xml_escape(value: &str) -> String {
