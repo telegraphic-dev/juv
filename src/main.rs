@@ -1438,6 +1438,7 @@ fn format_cli_java_agent(agent: &KeyValue) -> String {
 }
 
 const DEFAULT_PALANTIR_JAVA_FORMAT_VERSION: &str = "2.91.0";
+const TOOL_VERSION_CACHE_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 const PALANTIR_GROUP_PATH: &str = "com/palantir/javaformat";
 const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
@@ -1527,7 +1528,8 @@ fn resolve_formatter_backend(
     }
     let version = match version {
         Some(version) => version.to_string(),
-        None => latest_tool_version(
+        None => latest_cached_tool_version(
+            cache_dir,
             PALANTIR_GROUP_ID,
             PALANTIR_ARTIFACT_ID,
             &[juv::resolver::Repository::central()],
@@ -1835,7 +1837,8 @@ const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
 fn run_tests(cmd: TestCommand) -> Result<i32> {
     let junit_version = match cmd.junit_version.clone() {
         Some(version) => version,
-        None => latest_tool_version(
+        None => latest_cached_tool_version(
+            cmd.cache_dir.as_deref(),
             JUNIT_GROUP_ID,
             JUNIT_ARTIFACT_ID,
             &[juv::resolver::Repository::central()],
@@ -2056,6 +2059,34 @@ fn xml_attr(attrs: &str, name: &str) -> Option<String> {
         rest = next.trim_start();
     }
     None
+}
+
+fn latest_cached_tool_version(
+    cache_dir: Option<&Path>,
+    group_id: &str,
+    artifact_id: &str,
+    repos: &[juv::resolver::Repository],
+) -> Result<String> {
+    let metadata_dir = cache_root(cache_dir)?.join("metadata");
+    let cache_file = metadata_dir.join(format!("{group_id}.{artifact_id}.version"));
+    if let Ok(metadata) = fs::metadata(&cache_file) {
+        if let Ok(modified) = metadata.modified() {
+            if SystemTime::now()
+                .duration_since(modified)
+                .map(|age| age.as_secs() < TOOL_VERSION_CACHE_MAX_AGE_SECS)
+                .unwrap_or(false)
+            {
+                let cached = fs::read_to_string(&cache_file)?.trim().to_string();
+                if !cached.is_empty() {
+                    return Ok(cached);
+                }
+            }
+        }
+    }
+    let version = latest_tool_version(group_id, artifact_id, repos)?;
+    fs::create_dir_all(&metadata_dir)?;
+    fs::write(&cache_file, format!("{version}\n"))?;
+    Ok(version)
 }
 
 fn latest_tool_version(
@@ -2700,6 +2731,37 @@ mod test_command_unit_tests {
                 .unwrap();
         handle.join().unwrap();
         assert_eq!(version, "2.92.0");
+    }
+
+    #[test]
+    fn tool_latest_version_is_cached_temporarily() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, handle) = metadata_repo(
+            "org/junit/platform/junit-platform-console-standalone/maven-metadata.xml",
+            "6.3.0",
+        );
+        let first = latest_cached_tool_version(
+            Some(tmp.path()),
+            "org.junit.platform",
+            "junit-platform-console-standalone",
+            &[repo.clone()],
+        )
+        .unwrap();
+        handle.join().unwrap();
+
+        let second = latest_cached_tool_version(
+            Some(tmp.path()),
+            "org.junit.platform",
+            "junit-platform-console-standalone",
+            &[juv::resolver::Repository {
+                id: "offline".to_string(),
+                url: "http://127.0.0.1:9".to_string(),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(first, "6.3.0");
+        assert_eq!(second, "6.3.0");
     }
 
     fn metadata_repo(
