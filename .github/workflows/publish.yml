@@ -11,6 +11,86 @@ on:
         type: string
 
 jobs:
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_RELEASE_TAG"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - name: Create release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+
+  binary-assets:
+    name: Publish native binary (${{ matrix.target }})
+    needs: github-release
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - name: Resolve release tag
+        id: release
+        run: echo "tag=${{ needs.github-release.outputs.tag }}" >> "$GITHUB_OUTPUT"
+      - name: Set crate version from release tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: python3 scripts/set-release-version.py "$RELEASE_TAG"
+      - name: Build native binary
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Package native binary
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/jbx" dist/jbx
+          chmod +x dist/jbx
+          tar -C dist -czf "jbx-${{ matrix.target }}.tar.gz" jbx
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          files: jbx-${{ matrix.target }}.tar.gz
+
   crates-io:
     name: Publish to crates.io
     runs-on: ubuntu-latest

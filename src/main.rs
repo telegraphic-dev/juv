@@ -94,6 +94,8 @@ enum Commands {
     Fmt(FmtCommand),
     /// Convert Java source to/from JavaParser's native JSON serialization
     Graph(GraphCommand),
+    /// Print version-matched agent skills bundled with this jbx release.
+    Skill(SkillCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -658,6 +660,26 @@ struct AppUninstallCommand {
 
 #[derive(Parser, Debug)]
 struct AppListCommand;
+
+#[derive(Parser, Debug)]
+struct SkillCommand {
+    #[command(subcommand)]
+    command: SkillSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum SkillSubcommand {
+    /// List version-matched skills bundled with this jbx binary.
+    List,
+    /// Print a bundled skill. Defaults to the main jbx skill.
+    Get(SkillGetCommand),
+}
+
+#[derive(Parser, Debug)]
+struct SkillGetCommand {
+    /// Skill name to print. Defaults to jbx.
+    name: Option<String>,
+}
 
 #[derive(Parser, Debug)]
 struct JdkCommand {
@@ -6549,6 +6571,42 @@ fn should_run_as_maven_tool_shorthand(script: &Path) -> bool {
     matches!(parts.len(), 2..=4) && parts.iter().all(|part| !part.is_empty())
 }
 
+struct SkillEntry {
+    name: &'static str,
+    description: &'static str,
+    content: &'static str,
+}
+
+const BUNDLED_SKILLS: &[SkillEntry] = &[SkillEntry {
+    name: "jbx",
+    description:
+        "One-stop shop Java toolbox for agents and humans. Inspired by JBang, uv and zerolang.",
+    content: include_str!("../skill-data/jbx/SKILL.md"),
+}];
+
+fn run_skill(cmd: SkillCommand) -> Result<i32> {
+    match cmd.command {
+        SkillSubcommand::List => {
+            for skill in BUNDLED_SKILLS {
+                println!("{}\t{}", skill.name, skill.description);
+            }
+            Ok(0)
+        }
+        SkillSubcommand::Get(cmd) => {
+            let name = cmd.name.as_deref().unwrap_or("jbx");
+            let skill = BUNDLED_SKILLS
+                .iter()
+                .find(|skill| skill.name == name)
+                .with_context(|| format!("unknown bundled skill: {name}"))?;
+            print!("{}", skill.content);
+            if !skill.content.ends_with('\n') {
+                println!();
+            }
+            Ok(0)
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -7020,6 +7078,7 @@ fn main() -> Result<()> {
             GraphSubcommand::Dump(cmd) => run_graph_dump(cmd)?,
             GraphSubcommand::Import(cmd) => run_graph_import(cmd)?,
         },
+        Some(Commands::Skill(cmd)) => run_skill(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = jbx::jdk::list_jdks()?;
