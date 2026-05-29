@@ -1582,15 +1582,58 @@ fn render_member_section(
     let Some(members) = value.and_then(|value| value.as_array()) else {
         return;
     };
-    let signatures = members.iter().filter_map(render).collect::<Vec<_>>();
-    if signatures.is_empty() {
+    if members.iter().filter_map(render).next().is_none() {
         return;
     }
     out.push_str(&format!("### {title}\n\n"));
-    for signature in signatures {
-        out.push_str(&format!("- `{signature}`\n"));
+    for member in members {
+        let Some(signature) = render(member) else {
+            continue;
+        };
+        out.push_str(&format!("- `{signature}`"));
+        if let Some(description) = member.get("description").and_then(|value| value.as_str()) {
+            if !description.trim().is_empty() {
+                out.push_str(&format!(" — {}", inline_markdown(description)));
+            }
+        }
+        out.push('\n');
+        render_parameter_descriptions(out, member);
+        if let Some(description) = member
+            .get("returnDescription")
+            .and_then(|value| value.as_str())
+        {
+            if !description.trim().is_empty() {
+                out.push_str(&format!("  - Returns: {}\n", inline_markdown(description)));
+            }
+        }
     }
     out.push('\n');
+}
+
+fn render_parameter_descriptions(out: &mut String, member: &serde_json::Value) {
+    let Some(parameters) = member.get("parameters").and_then(|value| value.as_array()) else {
+        return;
+    };
+    for parameter in parameters {
+        let Some(description) = parameter
+            .get("description")
+            .and_then(|value| value.as_str())
+        else {
+            continue;
+        };
+        if description.trim().is_empty() {
+            continue;
+        }
+        let name = parameter
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("parameter");
+        out.push_str(&format!("  - `{name}`: {}\n", inline_markdown(description)));
+    }
+}
+
+fn inline_markdown(markdown: &str) -> String {
+    markdown.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn render_field_signature(field: &serde_json::Value) -> Option<String> {
@@ -2179,7 +2222,7 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
     } else {
         "class"
     };
-    let signatures = extract_javadoc_signatures(html);
+    let member_docs = extract_javadoc_member_docs(html);
     let description = extract_javadoc_type_description(html);
     let examples = extract_javadoc_examples(html);
     let mut builder = DocsTypeBuilder {
@@ -2198,12 +2241,130 @@ fn parse_javadoc_type_page(path: &str, html: &str) -> Option<serde_json::Value> 
         constructors: Vec::new(),
         methods: Vec::new(),
     };
-    for signature in signatures {
-        if let Some(member) = parse_member_declaration(&signature, &package, &name, Vec::new()) {
+    for member_doc in member_docs {
+        if let Some(mut member) =
+            parse_member_declaration(&member_doc.signature, &package, &name, Vec::new())
+        {
+            enrich_member_with_javadoc(&mut member, &member_doc);
             builder.push_member(member);
         }
     }
     Some(builder.into_json())
+}
+
+#[derive(Debug, Clone, Default)]
+struct JavadocMemberDoc {
+    signature: String,
+    description: Option<String>,
+    parameter_descriptions: Vec<(String, String)>,
+    return_description: Option<String>,
+}
+
+fn extract_javadoc_member_docs(html: &str) -> Vec<JavadocMemberDoc> {
+    let detail_re =
+        regex::Regex::new(r#"(?s)<section class=\"detail\"[^>]*>(.*?)</section>"#).unwrap();
+    let signature_re =
+        regex::Regex::new(r#"(?s)<div class=\"member-signature\">(.*?)</div>"#).unwrap();
+    let mut members = Vec::new();
+    for detail in detail_re
+        .captures_iter(html)
+        .filter_map(|captures| captures.get(1).map(|value| value.as_str()))
+    {
+        let Some(signature_html) = signature_re
+            .captures(detail)
+            .and_then(|captures| captures.get(1).map(|value| value.as_str()))
+        else {
+            continue;
+        };
+        let signature = normalize_doc_text(&strip_html_tags(signature_html));
+        if signature.is_empty() {
+            continue;
+        }
+        members.push(JavadocMemberDoc {
+            signature,
+            description: extract_javadoc_member_description(detail),
+            parameter_descriptions: extract_javadoc_parameter_descriptions(detail),
+            return_description: extract_javadoc_return_description(detail),
+        });
+    }
+    if members.is_empty() {
+        members.extend(
+            extract_javadoc_signatures(html)
+                .into_iter()
+                .map(|signature| JavadocMemberDoc {
+                    signature,
+                    ..JavadocMemberDoc::default()
+                }),
+        );
+    }
+    members
+}
+
+fn extract_javadoc_member_description(detail_html: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"(?s)<div class=\"block\">(.*?)</div>"#).unwrap();
+    re.captures(detail_html)
+        .and_then(|captures| captures.get(1))
+        .map(|value| html_fragment_to_markdown(value.as_str()))
+        .filter(|value| !value.is_empty())
+}
+
+fn extract_javadoc_parameter_descriptions(detail_html: &str) -> Vec<(String, String)> {
+    let re = regex::Regex::new(r#"(?s)<dd>\s*<code>(.*?)</code>\s*-\s*(.*?)</dd>"#).unwrap();
+    re.captures_iter(detail_html)
+        .filter_map(|captures| {
+            let name = captures
+                .get(1)
+                .map(|value| normalize_doc_text(&strip_html_tags(value.as_str())))?;
+            let description = captures
+                .get(2)
+                .map(|value| html_fragment_to_markdown(value.as_str()))?;
+            if name.is_empty() || description.is_empty() {
+                None
+            } else {
+                Some((name, description))
+            }
+        })
+        .collect()
+}
+
+fn extract_javadoc_return_description(detail_html: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"(?s)<dt>Returns:</dt>\s*<dd>(.*?)</dd>"#).unwrap();
+    re.captures(detail_html)
+        .and_then(|captures| captures.get(1))
+        .map(|value| html_fragment_to_markdown(value.as_str()))
+        .filter(|value| !value.is_empty())
+}
+
+fn enrich_member_with_javadoc(member: &mut DocsMember, doc: &JavadocMemberDoc) {
+    let value = match member {
+        DocsMember::Field(value) | DocsMember::Constructor(value) | DocsMember::Method(value) => {
+            value
+        }
+    };
+    if let Some(description) = &doc.description {
+        value["description"] = serde_json::Value::String(description.clone());
+    }
+    if let Some(return_description) = &doc.return_description {
+        value["returnDescription"] = serde_json::Value::String(return_description.clone());
+    }
+    if let Some(parameters) = value
+        .get_mut("parameters")
+        .and_then(|value| value.as_array_mut())
+    {
+        for parameter in parameters {
+            let Some(parameter_name) = parameter.get("name").and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            if let Some((_, description)) = doc
+                .parameter_descriptions
+                .iter()
+                .find(|(name, _)| name == parameter_name)
+            {
+                parameter["description"] = serde_json::Value::String(description.clone());
+            }
+        }
+    }
 }
 
 fn extract_javadoc_signatures(html: &str) -> Vec<String> {

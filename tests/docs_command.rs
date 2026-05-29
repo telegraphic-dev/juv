@@ -211,11 +211,27 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
 <div class="type-signature"><span class="modifiers">public class </span><span class="element-name type-name-label">JarWidget</span></div>
 <div class="block">Widget docs with <code>inline code</code>.</div>
 </section>
+<section class="field-details"><section class="detail" id="COMPARATOR">
 <div class="member-signature"><span class="modifiers">public static final</span> <span class="return-type">Comparator&lt;JarWidget&gt;</span> <span class="element-name">COMPARATOR</span></div>
+<div class="block">Sorts widgets by <code>name</code>.</div>
+</section></section>
+<section class="constructor-details"><section class="detail" id="%3Cinit%3E(java.lang.String)">
 <div class="member-signature"><span class="modifiers">public</span> <span class="element-name">JarWidget</span><span class="parameters">(String name)</span></div>
+<dl class="notes"><dt>Parameters:</dt><dd><code>name</code> - display name for the widget</dd></dl>
+</section></section>
+<section class="method-details"><section class="detail" id="children(java.util.Map)">
 <div class="member-signature"><span class="modifiers">public</span> <span class="return-type">List&lt;JarWidget&gt;</span> <span class="element-name">children</span><span class="parameters">(Map&lt;String, Object&gt; options)</span></div>
+<div class="block">Finds child widgets.</div>
+<dl class="notes"><dt>Parameters:</dt><dd><code>options</code> - lookup options</dd><dt>Returns:</dt><dd>matched child widgets</dd></dl>
+</section>
+<section class="detail" id="greet(java.lang.String)">
 <div class="member-signature"><span class="modifiers">public</span> <span class="return-type">String</span> <span class="element-name">greet</span><span class="parameters">(String name)</span></div>
+<div class="block">Greets a named widget.</div>
+<dl class="notes"><dt>Parameters:</dt><dd><code>name</code> - name to greet</dd><dt>Returns:</dt><dd>greeting text</dd></dl>
+</section>
+<section class="detail" id="size()">
 <div class="member-signature"><span class="modifiers">protected</span> <span class="return-type">int</span> <span class="element-name">size</span><span class="parameters">()</span></div>
+</section></section>
 </body></html>"#,
     )
     .unwrap();
@@ -260,6 +276,11 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
     assert_eq!(ty["description"], "Widget docs with `inline code`.");
     assert_eq!(ty["fields"][0]["name"], "COMPARATOR");
     assert_eq!(ty["fields"][0]["type"], "Comparator<JarWidget>");
+    assert_eq!(ty["fields"][0]["description"], "Sorts widgets by `name`.");
+    assert_eq!(
+        ty["constructors"][0]["parameters"][0]["description"],
+        "display name for the widget"
+    );
     let children = ty["methods"]
         .as_array()
         .unwrap()
@@ -267,7 +288,10 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
         .find(|method| method["name"] == "children")
         .unwrap();
     assert_eq!(children["returnType"], "List<JarWidget>");
+    assert_eq!(children["description"], "Finds child widgets.");
+    assert_eq!(children["returnDescription"], "matched child widgets");
     assert_eq!(children["parameters"][0]["type"], "Map<String, Object>");
+    assert_eq!(children["parameters"][0]["description"], "lookup options");
     let greet = ty["methods"]
         .as_array()
         .unwrap()
@@ -275,8 +299,11 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
         .find(|method| method["name"] == "greet")
         .unwrap();
     assert_eq!(greet["returnType"], "String");
+    assert_eq!(greet["description"], "Greets a named widget.");
+    assert_eq!(greet["returnDescription"], "greeting text");
     assert_eq!(greet["parameters"][0]["name"], "name");
     assert_eq!(greet["parameters"][0]["type"], "String");
+    assert_eq!(greet["parameters"][0]["description"], "name to greet");
     let size = ty["methods"]
         .as_array()
         .unwrap()
@@ -284,6 +311,30 @@ fn docs_local_jar_json_prefers_javadoc_and_supports_repeatable_type_filter() {
         .find(|method| method["name"] == "size")
         .unwrap();
     assert_eq!(size["visibility"], "protected");
+
+    let markdown_out = jbx_command()
+        .arg("docs")
+        .arg(&jar)
+        .arg("--type")
+        .arg("JarWidget")
+        .output()
+        .unwrap();
+    assert_success(&markdown_out);
+    let markdown = String::from_utf8(markdown_out.stdout).unwrap();
+    assert!(
+        markdown.contains(
+            "- `public static final Comparator<JarWidget> COMPARATOR` — Sorts widgets by `name`."
+        ),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("  - `options`: lookup options"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("  - Returns: matched child widgets"),
+        "{markdown}"
+    );
 }
 
 #[test]
