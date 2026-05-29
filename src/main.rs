@@ -3492,6 +3492,8 @@ const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
 const DEFAULT_OPENREWRITE_VERSION: &str = "8.83.4";
 const OPENREWRITE_GROUP_ID: &str = "org.openrewrite";
 const OPENREWRITE_ARTIFACT_ID: &str = "rewrite-java";
+const GRAPH_SLF4J_API_COORDINATE: &str = "org.slf4j:slf4j-api:2.0.17";
+const GRAPH_SLF4J_NOP_COORDINATE: &str = "org.slf4j:slf4j-nop:2.0.17";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 const JBX_GRAPH_HELPER_SOURCE: &str = include_str!("graph_helper/JbxGraph.java");
 
@@ -3734,6 +3736,8 @@ fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
     let coordinates = [
         format!("org.openrewrite:rewrite-java:{version}"),
         format!("org.openrewrite:rewrite-java-21:{version}"),
+        GRAPH_SLF4J_API_COORDINATE.to_string(),
+        GRAPH_SLF4J_NOP_COORDINATE.to_string(),
     ];
     let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;
     let helper_classes = compile_graph_helper(cache_dir, &classpath)?;

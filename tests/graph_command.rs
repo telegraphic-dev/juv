@@ -55,6 +55,33 @@ fn graph_dump_prints_stable_agent_friendly_ast_nodes() {
 }
 
 #[test]
+fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_basic.java");
+    fs::write(
+        &source,
+        "void main() {\n    String message = \"hello\";\n    IO.println(message);\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.starts_with("jbx-graph v1\ngraph-hash "), "{stdout}");
+    assert!(!stdout.contains("NoClassDefFoundError"), "{stdout}");
+    assert!(!stderr.contains("NoClassDefFoundError"), "{stderr}");
+}
+
+#[test]
 fn graph_patch_updates_string_literal_through_openrewrite_ast() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");
