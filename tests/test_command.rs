@@ -179,6 +179,31 @@ fn test_runs_junit_standalone_launcher_by_default() {
 }
 
 #[test]
+fn test_coverage_flag_writes_jacoco_exec_report() {
+    let tmp = tempfile::tempdir().unwrap();
+    let test = write_junit_test(&tmp);
+    let coverage_file = tmp.path().join("target/jacoco.exec");
+
+    let out = with_junit_version(juv_command().arg("test"))
+        .arg("--coverage")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&test)
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let metadata = fs::metadata(&coverage_file).unwrap_or_else(|err| {
+        panic!(
+            "expected JaCoCo coverage data at {}; error: {err}",
+            coverage_file.display()
+        )
+    });
+    assert!(metadata.len() > 0, "coverage report should not be empty");
+}
+
+#[test]
 fn test_json_prints_converted_junit_report() {
     let tmp = tempfile::tempdir().unwrap();
     let test = write_junit_test(&tmp);

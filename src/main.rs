@@ -426,6 +426,10 @@ struct TestCommand {
     #[arg(long = "xml", conflicts_with = "json")]
     xml: bool,
 
+    /// Collect JaCoCo coverage data in target/jacoco.exec.
+    #[arg(long = "coverage")]
+    coverage: bool,
+
     /// JUnit Platform Console Standalone version to use.
     ///
     /// Defaults to the cached latest Maven Central release, refreshed periodically.
@@ -6664,6 +6668,9 @@ const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckC
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
+const JACOCO_AGENT_COORDINATE: &str = "org.jacoco:org.jacoco.agent:runtime:0.8.13";
+const JACOCO_AGENT_PREFIX: &str = "org.jacoco.agent-";
+const JACOCO_COVERAGE_FILE: &str = "target/jacoco.exec";
 
 fn run_tests(cmd: TestCommand) -> Result<i32> {
     let junit_version = match cmd.junit_version.clone() {
@@ -6698,6 +6705,9 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let mut deps = source_directives.deps;
     deps.extend(split_cli_words(&cmd.deps));
     deps.push(launcher_coordinate);
+    if cmd.coverage {
+        deps.push(JACOCO_AGENT_COORDINATE.to_string());
+    }
     let mut repos = source_directives.repos;
     repos.extend(split_cli_words(&cmd.repos));
     let mut javac_options = source_directives.javac_options;
@@ -6731,6 +6741,25 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("could not resolve junit-platform-console-standalone"))?;
 
+    let jacoco_agent = if cmd.coverage {
+        Some(
+            build
+                .classpath
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with(JACOCO_AGENT_PREFIX) && name.ends_with("-runtime.jar")
+                        })
+                })
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("could not resolve JaCoCo agent"))?,
+        )
+    } else {
+        None
+    };
+
     let reports_dir = junit_reports_dir()?;
     fs::create_dir_all(&reports_dir)?;
     let mut runtime_cp = vec![build.classes_dir.clone()];
@@ -6739,6 +6768,17 @@ fn run_tests(cmd: TestCommand) -> Result<i32> {
     let jdk_root = jbx::jdk::resolve_jdk(&build.directives.java_version, true)?;
     let java = jbx::jdk::java_bin_path(&jdk_root).display().to_string();
     let mut java_cmd = ProcessCommand::new(&java);
+    if let Some(agent) = &jacoco_agent {
+        let coverage_path = PathBuf::from(JACOCO_COVERAGE_FILE);
+        if let Some(parent) = coverage_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        java_cmd.arg(format!(
+            "-javaagent:{}=destfile={},append=false",
+            agent.display(),
+            coverage_path.display()
+        ));
+    }
     for agent in &build.directives.java_agents {
         java_cmd.arg(format_cli_java_agent(agent));
     }
