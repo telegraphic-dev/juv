@@ -13,6 +13,7 @@ Install the latest release:
 
 ```sh
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
+export PATH="$HOME/.jbx/bin:$PATH"
 jbx --version
 ```
 
