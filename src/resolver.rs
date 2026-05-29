@@ -792,34 +792,20 @@ pub fn resolve_classpath(
 ) -> Result<Vec<PathBuf>> {
     let artifacts = resolve(coordinates, repos, cache_dir)?;
 
-    // Download all JARs (resolve is now metadata-only)
+    // Download all JARs (resolve is now metadata-only).  This is the slow
+    // path for cold caches, so run independent artifact downloads in parallel
+    // while preserving deterministic warning order.
     fs::create_dir_all(cache_dir).context("failed to create cache directory")?;
-    for artifact in &artifacts {
-        if let Err(e) = download_jar(artifact, repos, cache_dir) {
-            // POM-only artifacts (BOMs, parent POMs) won't have JARs — skip silently
-            // We can't tell from here if it's POM-only, so just warn
-            eprintln!("warning: could not download JAR for {artifact}: {e:#}");
-        }
+    for (index, e) in download_jars_parallel(&artifacts, repos, cache_dir) {
+        let artifact = &artifacts[index];
+        // POM-only artifacts (BOMs, parent POMs) won't have JARs — skip silently
+        // We can't tell from here if it's POM-only, so just warn.
+        eprintln!("warning: could not download JAR for {artifact}: {e:#}");
     }
 
     let mut paths: Vec<PathBuf> = Vec::new();
     for artifact in &artifacts {
-        let group_path = sanitize_path_segment(&artifact.module.org).replace('.', "/");
-        let artifact_name = sanitize_path_segment(&artifact.module.name);
-        let version = sanitize_path_segment(&artifact.version);
-        let jar_name = match &artifact.classifier {
-            Some(c) => format!(
-                "{}-{}-{}.jar",
-                artifact_name,
-                version,
-                sanitize_path_segment(c)
-            ),
-            None => format!("{}-{}.jar", artifact_name, version),
-        };
-        let jar_path = cache_dir
-            .join(&group_path)
-            .join(&artifact_name)
-            .join(&jar_name);
+        let jar_path = artifact_cache_jar_path(artifact, cache_dir);
         if jar_path.exists() {
             paths.push(jar_path);
         }
@@ -1217,20 +1203,10 @@ fn parse_version_parts(v: &str) -> Vec<String> {
     v.split(['.', '-']).map(|s| s.to_string()).collect()
 }
 
-/// Download a JAR to the cache directory.
-/// Probes Maven local repo and Gradle cache before downloading.
-fn download_jar(
-    artifact: &ResolvedArtifact,
-    repos: &[Repository],
-    cache_dir: &Path,
-) -> Result<PathBuf> {
-    // Use groupId path segments to avoid collisions between artifacts
-    // with the same artifactId+version from different groups.
-    // Sanitize all coordinate-derived path segments to prevent traversal.
-    let group_path = sanitize_path_segment(&artifact.module.org).replace('.', "/");
+fn artifact_jar_name(artifact: &ResolvedArtifact) -> String {
     let artifact_name = sanitize_path_segment(&artifact.module.name);
     let version = sanitize_path_segment(&artifact.version);
-    let jar_name = match &artifact.classifier {
+    match &artifact.classifier {
         Some(c) => format!(
             "{}-{}-{}.jar",
             artifact_name,
@@ -1238,17 +1214,81 @@ fn download_jar(
             sanitize_path_segment(c)
         ),
         None => format!("{}-{}.jar", artifact_name, version),
-    };
-    let jar_path = cache_dir
+    }
+}
+
+fn artifact_cache_jar_path(artifact: &ResolvedArtifact, cache_dir: &Path) -> PathBuf {
+    let group_path = sanitize_path_segment(&artifact.module.org).replace('.', "/");
+    let artifact_name = sanitize_path_segment(&artifact.module.name);
+    let jar_name = artifact_jar_name(artifact);
+    cache_dir
         .join(&group_path)
         .join(&artifact_name)
-        .join(&jar_name);
+        .join(&jar_name)
+}
+
+fn dependency_download_parallelism(artifact_count: usize) -> usize {
+    if artifact_count == 0 {
+        return 0;
+    }
+    let minimum = artifact_count.min(2);
+    std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(4)
+        .clamp(minimum, 8)
+        .min(artifact_count)
+}
+
+fn download_jars_parallel(
+    artifacts: &[ResolvedArtifact],
+    repos: &[Repository],
+    cache_dir: &Path,
+) -> Vec<(usize, anyhow::Error)> {
+    let workers = dependency_download_parallelism(artifacts.len());
+    if workers == 0 {
+        return Vec::new();
+    }
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let next = &next;
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(artifact) = artifacts.get(index) else {
+                    break;
+                };
+                if let Err(e) = download_jar(artifact, repos, cache_dir) {
+                    let _ = tx.send((index, e));
+                }
+            });
+        }
+    });
+    drop(tx);
+
+    let mut errors: Vec<_> = rx.into_iter().collect();
+    errors.sort_by_key(|(index, _)| *index);
+    errors
+}
+
+/// Download a JAR to the cache directory.
+/// Probes Maven local repo and Gradle cache before downloading.
+fn download_jar(
+    artifact: &ResolvedArtifact,
+    repos: &[Repository],
+    cache_dir: &Path,
+) -> Result<PathBuf> {
+    let jar_path = artifact_cache_jar_path(artifact, cache_dir);
 
     // 1. Check jbx's own cache
     if jar_path.exists() {
         return Ok(jar_path);
     }
 
+    let jar_name = artifact_jar_name(artifact);
     // 2. Probe existing tool caches (Maven, Gradle, Coursier)
     if let Some(cached) = probe_local_caches(&artifact.module, &artifact.version, &jar_name) {
         // Symlink from jbx cache to the existing file
@@ -1815,6 +1855,96 @@ mod tests {
     fn classifier_is_none_from_three_segment_coordinate() {
         let dep = parse_coordinate("org.example:lib:1.0").unwrap();
         assert_eq!(dep.classifier, None);
+    }
+
+    #[test]
+    fn downloads_missing_jars_in_parallel() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let stop_server = Arc::new(AtomicBool::new(false));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server_active = Arc::clone(&active);
+        let server_max_active = Arc::clone(&max_active);
+        let server_stop = Arc::clone(&stop_server);
+        let server = std::thread::spawn(move || {
+            let mut handlers = Vec::new();
+            while !server_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let active = Arc::clone(&server_active);
+                        let max_active = Arc::clone(&server_max_active);
+                        handlers.push(std::thread::spawn(move || {
+                            let mut buf = [0; 1024];
+                            let bytes = stream.read(&mut buf).unwrap();
+                            let request = String::from_utf8_lossy(&buf[..bytes]);
+                            let path = request
+                                .lines()
+                                .next()
+                                .and_then(|line| line.split_whitespace().nth(1))
+                                .unwrap_or("/");
+                            if path.ends_with(".jar") {
+                                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                                max_active.fetch_max(current, Ordering::SeqCst);
+                                std::thread::sleep(Duration::from_millis(150));
+                                active.fetch_sub(1, Ordering::SeqCst);
+                                stream
+                                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\njar")
+                                    .unwrap();
+                            } else {
+                                stream
+                                    .write_all(
+                                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+                                    )
+                                    .unwrap();
+                            }
+                        }));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("test server failed to accept connection: {e}"),
+                }
+            }
+            for handler in handlers {
+                handler.join().unwrap();
+            }
+        });
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repos = vec![Repository {
+            id: "local".to_string(),
+            url: base_url,
+        }];
+        let artifacts: Vec<ResolvedArtifact> = (0..4)
+            .map(|idx| ResolvedArtifact {
+                module: Module {
+                    org: "com.example.parallel".to_string(),
+                    name: format!("lib{idx}"),
+                },
+                version: "1.0.0".to_string(),
+                classifier: None,
+            })
+            .collect();
+
+        let errors = download_jars_parallel(&artifacts, &repos, tmp.path());
+        assert!(
+            errors.is_empty(),
+            "expected all downloads to succeed: {errors:?}"
+        );
+        assert!(
+            max_active.load(Ordering::SeqCst) > 1,
+            "expected concurrent JAR downloads"
+        );
+        stop_server.store(true, Ordering::SeqCst);
+        server.join().unwrap();
     }
 
     #[test]
