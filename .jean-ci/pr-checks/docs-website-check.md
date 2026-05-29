@@ -19,10 +19,11 @@ When the PR affects visible behavior:
 - [ ] `website/public/install.sh` and install snippets agree when installation behavior changes.
 - [ ] `website/src/build.mjs` output expectations still match the content structure, including Markdown route siblings, `llms.txt`, and `llms-full.txt`.
 
-### 3. Agent skill alignment
-- [ ] Agent-facing guidance in `skill-data/jbx/SKILL.md` is updated when command workflows change.
-- [ ] The discovery skill at `skills/jbx/SKILL.md` stays thin and points agents to version-matched `jbx skill` output.
-- [ ] `jbx skill list` / `jbx skill get` output remains consistent with the bundled skill data when those commands are touched.
+### 3. Bundled skill alignment
+- [ ] Every affected bundled runtime skill under `skill-data/*/SKILL.md` is updated when command workflows, gates, examples, or safety rules change.
+- [ ] Every affected installable discovery skill under `skills/*/SKILL.md` stays accurate and points agents toward version-matched guidance instead of duplicating stale internals.
+- [ ] If the PR adds, renames, removes, lists, or retrieves skills, the CLI behavior, embedded skill data, discovery stubs, README, and website examples all agree.
+- [ ] The review is generic across all bundled skills; do not hard-code assumptions that only a `jbx` skill can exist.
 
 ### 4. Dedicated docs
 - [ ] Changes to `jbx docs`, JSON sidecars, or documentation schema update `docs/jbx-docs-schema.md` and website docs as needed.
@@ -36,7 +37,7 @@ Run from the repository root:
 scripts/check-docs-website.sh
 ```
 
-This script validates whitespace, website generation, and install-script shell syntax. It is not a substitute for the alignment review above; it catches broken docs/website plumbing, not stale prose.
+This script validates whitespace, website generation, install-script shell syntax, and generic bundled skill structure. It is not a substitute for the alignment review above; it catches broken docs/website/skill plumbing, not stale prose.
 
 ## Verdict Criteria
 
