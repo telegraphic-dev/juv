@@ -37,9 +37,14 @@ Implemented now:
 - `jbx run <alias>` / `jbx <alias>` run local catalog aliases
 - `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
-- `jbx doctor [script.java|url] [--json]` diagnoses JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and context-only tools such as GPG/native-image
+- `jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]` diagnoses JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and context-only tools such as GPG/native-image
+- `jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` previews OpenRewrite changes and writes `rewrite/rewrite.patch`
+- `jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` applies OpenRewrite changes to source files
+- `jbx rewrite modules [--search term] [--limit n] [--json] [--rewrite-version version]` lists searchable standard OpenRewrite modules known by jbx
+- `jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` lists/searches recipes available from a module, including jbx short names where known
 - `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
-- `jbx graph import <ast.json> [-o script.java]` convert JavaParser's native AST JSON serialization back to Java source
+- `jbx graph import <ast.json> [-o script.java]` converts JavaParser's native AST JSON serialization back to Java source
+- `jbx rewrite` runs OpenRewrite through jbx-managed dependencies and JDKs. Use `jbx rewrite patch` for previews and `jbx rewrite apply` for source mutation. Use `--recipe <short|fqn>` for recipe aliases such as `auto-format`, `format`, `cleanup`, `remove-unused-imports`, and `change-package`; use `--module <short|GAV>` for extra OpenRewrite modules (`yaml` expands to `org.openrewrite:rewrite-yaml:<version>`, full GAVs are passed through). Standard module aliases are `java`, `java-21`, `xml`, `yaml`, `properties`, `json`, `maven`, `gradle`, `groovy`, `kotlin`, `protobuf`, and `hcl`. Java recipe support is built in, Maven modules are not loaded unless requested. Recipe options use `--option key=value`; `change-package` also accepts `old=` and `new=` aliases. Use `jbx rewrite modules` to search standard modules and `jbx rewrite recipes <short|GAV> --detail` to search recipes and inspect descriptions/options.
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `jbx export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
@@ -98,7 +103,7 @@ Implemented now:
 - `jbx info deps`, `repos`, `sources`, and `files` print directive collections one-per-line
 - `jbx info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
 - `jbx info cache` prints the effective cache directory
-- `jbx doctor [script.java|url]` prints human-readable environment diagnostics; `--json` emits structured checks for agents and CI
+- `jbx doctor [script.java|url] [--json] [--cache-dir dir] [--repo id=url] [--publish] [--native]` prints human-readable environment diagnostics; `--json` emits structured checks for agents and CI, `--cache-dir` probes an isolated cache, `--repo`/`--repos` adds dependency repositories, and `--publish` / `--native` opt into contextual GPG and GraalVM `native-image` checks
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
 - local and imported catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `alias add/remove`, `catalog add/list`, `base-ref`, `script-ref`, `catalog-ref`, `import`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
 - imported catalog templates with `file-refs` and default `properties`, usable via `jbx init --template <name>`

@@ -11,6 +11,7 @@ description: Rust-native, JBang-compatible Java tooling for autonomous agents an
 jbx Hello.java world
 jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 jbx docs com.fasterxml.jackson.core:jackson-databind --json
+jbx doctor Hello.java --json
 ```
 
 ## Why it exists
@@ -18,7 +19,7 @@ jbx docs com.fasterxml.jackson.core:jackson-databind --json
 Agents do not need another clever Java wrapper. They need a tool that is scriptable, inspectable, deterministic, and fast enough to use repeatedly inside coding loops.
 
 - Run Java scripts and Maven executable tools from one command.
-- Resolve, fetch, test, format, export, publish, and document Java projects.
+- Resolve, fetch, test, format, diagnose, export, publish, and document Java projects.
 - Prefer structured output for automation, plain Markdown for reading, and reproducible behavior over magic.
 - Stay compatible with JBang where users already have muscle memory.
 
