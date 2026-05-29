@@ -240,11 +240,15 @@ public final class JbxGraph {
         ExecutionContext ctx = new InMemoryExecutionContext(throwable -> {
             throw new RuntimeException(throwable);
         });
+        ctx.putMessage(ExecutionContext.REQUIRE_PRINT_EQUALS_INPUT, false);
         SourceFile sourceFile = JavaParser.fromJavaVersion()
                 .build()
                 .parse(ctx, parseText)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("OpenRewrite did not parse " + source));
+        if (sourceFile instanceof org.openrewrite.tree.ParseError parseError) {
+            throw parseError.toException();
+        }
         if (!(sourceFile instanceof J.CompilationUnit)) {
             throw new IllegalArgumentException("OpenRewrite parsed " + source + " as " + sourceFile.getClass().getName() + " instead of a Java compilation unit");
         }

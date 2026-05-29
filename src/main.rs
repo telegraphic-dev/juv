@@ -3741,6 +3741,7 @@ fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
     let coordinates = [
         format!("org.openrewrite:rewrite-java:{version}"),
         format!("org.openrewrite:rewrite-java-21:{version}"),
+        format!("org.openrewrite:rewrite-java-25:{version}"),
         GRAPH_SLF4J_API_COORDINATE.to_string(),
         GRAPH_SLF4J_SIMPLE_COORDINATE.to_string(),
     ];

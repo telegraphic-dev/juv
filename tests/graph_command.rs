@@ -93,6 +93,68 @@ fn graph_dump_escapes_tabs_in_literal_values() {
 }
 
 #[test]
+fn graph_dump_handles_jbang_java25_compact_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_basic.java");
+    fs::write(
+        &source,
+        "///usr/bin/env jbang \"$0\" \"$@\" ; exit $?\n//JAVA 25\nimport java.util.*;\n\nString greeting = \"hello\";\n\nvoid main() {\n    IO.println(greeting);\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "variable" && node["name"] == "greeting"));
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "method" && node["name"] == "main"));
+}
+#[test]
+fn graph_dump_handles_java25_module_import_compact_source() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_module.java");
+    fs::write(
+        &source,
+        "//JAVA 25\nimport module java.base;\n\nvoid main() {\n    IO.println(\"hello\");\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "method" && node["name"] == "main"));
+}
+
+#[test]
 fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("nanocode_basic.java");
