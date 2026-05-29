@@ -115,8 +115,54 @@ fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.starts_with("jbx-graph v1\ngraph-hash "), "{stdout}");
+    assert!(stdout.contains("kind=method name=\"main\""), "{stdout}");
+    assert!(
+        stdout.contains("kind=variable name=\"message\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("kind=literal value=\"hello\""), "{stdout}");
+    assert!(stdout.contains("kind=call name=\"println\""), "{stdout}");
     assert!(!stdout.contains("NoClassDefFoundError"), "{stdout}");
     assert!(!stderr.contains("NoClassDefFoundError"), "{stderr}");
+}
+
+#[test]
+fn graph_dump_json_prints_ast_nodes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_basic.java");
+    fs::write(
+        &source,
+        "void main() {\n    String message = \"hello\";\n    IO.println(message);\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["version"], "jbx-graph v1");
+    assert_eq!(value["path"], source.to_string_lossy().as_ref());
+    assert!(value["graphHash"]
+        .as_str()
+        .is_some_and(|hash| hash.len() == 64));
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "method" && node["name"] == "main"));
+    assert!(value["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|node| node["kind"] == "literal" && node["value"] == "hello"));
 }
 
 #[test]
@@ -158,6 +204,48 @@ fn graph_patch_updates_string_literal_through_openrewrite_ast() {
     let updated = fs::read_to_string(&source).unwrap();
     assert!(updated.contains("\"goodbye\""), "{updated}");
     assert!(!updated.contains("\"hello\""), "{updated}");
+}
+
+#[test]
+fn graph_patch_updates_compact_source_without_leaking_wrapper() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_basic.java");
+    fs::write(
+        &source,
+        "void main() {\n    String message = \"hello\";\n    IO.println(message);\n}\n",
+    )
+    .unwrap();
+
+    let dump = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&dump);
+    let stdout = String::from_utf8_lossy(&dump.stdout);
+    let hash = graph_hash(&stdout);
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("patch")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--expect-graph-hash")
+        .arg(hash)
+        .arg("--op")
+        .arg("set node=\"#literal-1\" field=\"value\" expect=\"hello\" value=\"goodbye\"")
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let updated = fs::read_to_string(&source).unwrap();
+    assert!(updated.contains("\"goodbye\""), "{updated}");
+    assert!(!updated.contains("__JbxCompactSource"), "{updated}");
+    assert!(updated.trim_start().starts_with("void main()"), "{updated}");
 }
 
 #[test]

@@ -523,6 +523,10 @@ enum GraphSubcommand {
 
 #[derive(Parser, Debug)]
 struct GraphDumpCommand {
+    /// Print the graph as JSON.
+    #[arg(long = "json")]
+    json: bool,
+
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
@@ -3687,10 +3691,11 @@ struct GraphBackend {
 
 fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
     let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
-    let output = run_graph_helper(
-        &backend,
-        &["dump".to_string(), cmd.script.to_string_lossy().to_string()],
-    )?;
+    let mut args = vec!["dump".to_string(), cmd.script.to_string_lossy().to_string()];
+    if cmd.json {
+        args.push("--json".to_string());
+    }
+    let output = run_graph_helper(&backend, &args)?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     if !output.stderr.is_empty() {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));

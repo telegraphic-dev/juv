@@ -23,6 +23,7 @@ import org.openrewrite.java.tree.JavaType;
 
 public final class JbxGraph {
     private static final Pattern TOKEN = Pattern.compile("(\\w+)=\\\"((?:\\\\.|[^\\\"])*)\\\"");
+    private static final String COMPACT_WRAPPER_CLASS = "__JbxCompactSource";
 
     private JbxGraph() {}
 
@@ -34,7 +35,8 @@ public final class JbxGraph {
         String command = args[0];
         Path source = Path.of(args[1]);
         if ("dump".equals(command)) {
-            System.out.print(dump(source));
+            boolean json = args.length > 2 && "--json".equals(args[2]);
+            System.out.print(dump(source, json));
             return;
         }
         if ("patch".equals(command)) {
@@ -66,17 +68,22 @@ public final class JbxGraph {
             System.err.println("graph patch requires at least one --op");
             System.exit(2);
         }
-        String graph = dump(source);
+        String graph = dump(source, false);
         String actualHash = graphHash(graph);
         if (!expectedHash.equals(actualHash)) {
             System.err.println("graph hash mismatch: expected " + expectedHash + " but was " + actualHash);
             System.exit(1);
         }
-        SourceFile parsed = parse(source);
+        ParsedSource parsed = parse(source);
+        SourceFile sourceFile = parsed.sourceFile();
         for (String op : ops) {
-            parsed = applySetLiteralValue(parsed, op);
+            sourceFile = applySetLiteralValue(sourceFile, op);
         }
-        Files.writeString(source, parsed.printAll(), StandardCharsets.UTF_8);
+        String printed = sourceFile.printAll();
+        if (parsed.compact()) {
+            printed = unwrapCompactSource(printed);
+        }
+        Files.writeString(source, printed, StandardCharsets.UTF_8);
         System.out.println("patched " + source);
     }
 
@@ -124,9 +131,19 @@ public final class JbxGraph {
         return updated;
     }
 
-    private static String dump(Path source) throws IOException {
-        SourceFile parsed = parse(source);
-        List<String> nodes = new ArrayList<>();
+    private static String dump(Path source, boolean json) throws IOException {
+        ParsedSource parsed = parse(source);
+        List<Node> nodes = collectNodes(parsed.sourceFile(), parsed.compact());
+        String body = graphBody(source, nodes);
+        String hash = graphHash(body);
+        if (json) {
+            return jsonGraph(source, hash, nodes);
+        }
+        return "jbx-graph v1\n" + "graph-hash " + hash + "\n" + body;
+    }
+
+    private static List<Node> collectNodes(SourceFile parsed, boolean compact) {
+        List<Node> nodes = new ArrayList<>();
         AtomicInteger classIndex = new AtomicInteger();
         AtomicInteger methodIndex = new AtomicInteger();
         AtomicInteger callIndex = new AtomicInteger();
@@ -135,26 +152,28 @@ public final class JbxGraph {
         new JavaVisitor<Integer>() {
             @Override
             public J visitClassDeclaration(J.ClassDeclaration classDecl, Integer integer) {
-                nodes.add("node #class-" + classIndex.incrementAndGet() + " kind=class name=\"" + esc(classDecl.getSimpleName()) + "\"");
+                if (!(compact && COMPACT_WRAPPER_CLASS.equals(classDecl.getSimpleName()))) {
+                    nodes.add(new Node("class-" + classIndex.incrementAndGet(), "class", "name", classDecl.getSimpleName()));
+                }
                 return super.visitClassDeclaration(classDecl, integer);
             }
 
             @Override
             public J visitMethodDeclaration(J.MethodDeclaration method, Integer integer) {
-                nodes.add("node #method-" + methodIndex.incrementAndGet() + " kind=method name=\"" + esc(method.getSimpleName()) + "\"");
+                nodes.add(new Node("method-" + methodIndex.incrementAndGet(), "method", "name", method.getSimpleName()));
                 return super.visitMethodDeclaration(method, integer);
             }
 
             @Override
             public J visitMethodInvocation(J.MethodInvocation method, Integer integer) {
-                nodes.add("node #call-" + callIndex.incrementAndGet() + " kind=call name=\"" + esc(method.getSimpleName()) + "\"");
+                nodes.add(new Node("call-" + callIndex.incrementAndGet(), "call", "name", method.getSimpleName()));
                 return super.visitMethodInvocation(method, integer);
             }
 
             @Override
             public J visitVariableDeclarations(J.VariableDeclarations multiVariable, Integer integer) {
                 for (J.VariableDeclarations.NamedVariable variable : multiVariable.getVariables()) {
-                    nodes.add("node #variable-" + variableIndex.incrementAndGet() + " kind=variable name=\"" + esc(variable.getSimpleName()) + "\"");
+                    nodes.add(new Node("variable-" + variableIndex.incrementAndGet(), "variable", "name", variable.getSimpleName()));
                 }
                 return super.visitVariableDeclarations(multiVariable, integer);
             }
@@ -162,27 +181,69 @@ public final class JbxGraph {
             @Override
             public J visitLiteral(J.Literal literal, Integer integer) {
                 Object value = literal.getValue();
-                nodes.add("node #literal-" + literalIndex.incrementAndGet() + " kind=literal value=\"" + esc(value == null ? "null" : value.toString()) + "\"");
+                nodes.add(new Node("literal-" + literalIndex.incrementAndGet(), "literal", "value", value == null ? "null" : value.toString()));
                 return super.visitLiteral(literal, integer);
             }
         }.visit(parsed, 0);
-        StringBuilder body = new StringBuilder();
-        body.append("path ").append(source).append('\n');
-        for (String node : nodes) {
-            body.append(node).append('\n');
-        }
-        String hash = graphHash(body.toString());
-        return "jbx-graph v1\n" + "graph-hash " + hash + "\n" + body;
+        return nodes;
     }
 
-    private static SourceFile parse(Path source) throws IOException {
-        ExecutionContext ctx = new InMemoryExecutionContext(Throwable::printStackTrace);
+    private static String graphBody(Path source, List<Node> nodes) {
+        StringBuilder body = new StringBuilder();
+        body.append("path ").append(source).append('\n');
+        for (Node node : nodes) {
+            body.append("node #")
+                    .append(node.id())
+                    .append(" kind=")
+                    .append(node.kind())
+                    .append(' ')
+                    .append(node.field())
+                    .append("=\"")
+                    .append(esc(node.value()))
+                    .append("\"\n");
+        }
+        return body.toString();
+    }
+
+    private static String jsonGraph(Path source, String hash, List<Node> nodes) {
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"version\": \"jbx-graph v1\",\n");
+        json.append("  \"graphHash\": \"").append(hash).append("\",\n");
+        json.append("  \"path\": \"").append(jsonEsc(source.toString())).append("\",\n");
+        json.append("  \"nodes\": [\n");
+        for (int i = 0; i < nodes.size(); i++) {
+            Node node = nodes.get(i);
+            json.append("    {\"id\": \"#")
+                    .append(jsonEsc(node.id()))
+                    .append("\", \"kind\": \"")
+                    .append(jsonEsc(node.kind()))
+                    .append("\", \"")
+                    .append(jsonEsc(node.field()))
+                    .append("\": \"")
+                    .append(jsonEsc(node.value()))
+                    .append("\"}");
+            if (i + 1 < nodes.size()) {
+                json.append(',');
+            }
+            json.append('\n');
+        }
+        json.append("  ]\n");
+        json.append("}\n");
+        return json.toString();
+    }
+
+    private static ParsedSource parse(Path source) throws IOException {
         String text = Files.readString(source, StandardCharsets.UTF_8);
-        return JavaParser.fromJavaVersion()
+        boolean compact = isCompactSource(text);
+        String parseText = compact ? wrapCompactSource(text) : text;
+        ExecutionContext ctx = new InMemoryExecutionContext(Throwable::printStackTrace);
+        SourceFile sourceFile = JavaParser.fromJavaVersion()
                 .build()
-                .parse(ctx, text)
+                .parse(ctx, parseText)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("OpenRewrite did not parse " + source));
+        return new ParsedSource(sourceFile, compact);
     }
 
     private static String graphHash(String graph) {
@@ -252,7 +313,144 @@ public final class JbxGraph {
         return out.toString();
     }
 
+    private static String jsonEsc(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    private static boolean isCompactSource(String source) {
+        int braceDepth = 0;
+        for (String line : source.split("\\R")) {
+            String trimmed = line.stripLeading();
+            if (braceDepth == 0 && !startsWithJavaTypeDeclaration(trimmed) && trimmed.startsWith("void main(")) {
+                return true;
+            }
+            braceDepth = updateBraceDepth(braceDepth, line);
+        }
+        return false;
+    }
+
+    private static int updateBraceDepth(int depth, String line) {
+        int next = depth;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '{') {
+                next++;
+            } else if (ch == '}') {
+                next = Math.max(0, next - 1);
+            }
+        }
+        return next;
+    }
+
+    private static boolean startsWithJavaTypeDeclaration(String trimmed) {
+        String[] prefixes = {
+                "class ", "abstract class ", "sealed class ", "non-sealed class ", "final class ",
+                "public class ", "public abstract class ", "public sealed class ", "public non-sealed class ", "public final class ",
+                "record ", "public record ", "interface ", "public interface ", "enum ", "public enum ", "@interface ", "public @interface "
+        };
+        for (String prefix : prefixes) {
+            if (trimmed.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String wrapCompactSource(String source) {
+        String[] split = splitCompactPrefix(source);
+        StringBuilder wrapped = new StringBuilder();
+        wrapped.append(split[0]);
+        wrapped.append("class ").append(COMPACT_WRAPPER_CLASS).append(" {\n");
+        for (String line : split[1].split("\\R", -1)) {
+            if (!line.isEmpty()) {
+                wrapped.append("    ").append(line);
+            }
+            wrapped.append('\n');
+        }
+        wrapped.append("}\n");
+        return wrapped.toString();
+    }
+
+    private static String[] splitCompactPrefix(String source) {
+        StringBuilder prefix = new StringBuilder();
+        StringBuilder body = new StringBuilder();
+        boolean inPrefix = true;
+        boolean inBlockComment = false;
+        for (String line : source.split("\\R", -1)) {
+            String trimmed = line.stripLeading();
+            if (inPrefix) {
+                boolean prefixLine = inBlockComment
+                        || trimmed.isEmpty()
+                        || trimmed.startsWith("//")
+                        || trimmed.startsWith("#!")
+                        || trimmed.startsWith("import ")
+                        || trimmed.startsWith("/*");
+                if (prefixLine) {
+                    prefix.append(line).append('\n');
+                    if (inBlockComment || trimmed.startsWith("/*")) {
+                        inBlockComment = !trimmed.contains("*/");
+                    }
+                    continue;
+                }
+                inPrefix = false;
+            }
+            body.append(line).append('\n');
+        }
+        return new String[] {prefix.toString(), body.toString().stripTrailing()};
+    }
+
+    private static String unwrapCompactSource(String printed) {
+        String[] lines = printed.split("\\R", -1);
+        int wrapperStart = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].trim().equals("class " + COMPACT_WRAPPER_CLASS + " {")) {
+                wrapperStart = i;
+                break;
+            }
+        }
+        if (wrapperStart < 0) {
+            return printed;
+        }
+        int wrapperEnd = -1;
+        for (int i = lines.length - 1; i > wrapperStart; i--) {
+            if (lines[i].trim().equals("}")) {
+                wrapperEnd = i;
+                break;
+            }
+        }
+        if (wrapperEnd < 0) {
+            return printed;
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < wrapperStart; i++) {
+            out.append(lines[i]).append('\n');
+        }
+        int indent = Integer.MAX_VALUE;
+        for (int i = wrapperStart + 1; i < wrapperEnd; i++) {
+            String line = lines[i];
+            if (!line.isBlank()) {
+                indent = Math.min(indent, line.length() - line.stripLeading().length());
+            }
+        }
+        if (indent == Integer.MAX_VALUE) {
+            indent = 0;
+        }
+        for (int i = wrapperStart + 1; i < wrapperEnd; i++) {
+            String line = lines[i];
+            out.append(line.length() >= indent ? line.substring(indent) : line).append('\n');
+        }
+        return out.toString();
+    }
+
     private static String quoteJava(String value) {
         return "\"" + esc(value).replace("\t", "\\t") + "\"";
     }
+
+    private record ParsedSource(SourceFile sourceFile, boolean compact) {}
+
+    private record Node(String id, String kind, String field, String value) {}
 }
