@@ -95,7 +95,7 @@ Implemented now:
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - Java package-aware main-class inference
 - `//FILES` resources copied onto the runtime classpath
-- non-coordinate `//DEPS` treated as source dependencies
+- non-coordinate `//DEPS` treated as source dependencies; Maven coordinates may be `group:artifact:version`, `group:artifact:classifier:version`, or just `group:artifact` to resolve the latest release from Maven metadata
 - `//PREVIEW` compile/runtime flag handling
 - `jbx resolve <coordinates...>` resolve Maven coordinates to dependency list
 - `jbx resolve --classpath <coordinates...>` resolve to classpath
