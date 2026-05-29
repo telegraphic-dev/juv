@@ -237,12 +237,17 @@ public final class JbxGraph {
         String text = Files.readString(source, StandardCharsets.UTF_8);
         boolean compact = isCompactSource(text);
         String parseText = compact ? wrapCompactSource(text) : text;
-        ExecutionContext ctx = new InMemoryExecutionContext(Throwable::printStackTrace);
+        ExecutionContext ctx = new InMemoryExecutionContext(throwable -> {
+            throw new RuntimeException(throwable);
+        });
         SourceFile sourceFile = JavaParser.fromJavaVersion()
                 .build()
                 .parse(ctx, parseText)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("OpenRewrite did not parse " + source));
+        if (!(sourceFile instanceof J.CompilationUnit)) {
+            throw new IllegalArgumentException("OpenRewrite parsed " + source + " as " + sourceFile.getClass().getName() + " instead of a Java compilation unit");
+        }
         return new ParsedSource(sourceFile, compact);
     }
 
@@ -323,14 +328,30 @@ public final class JbxGraph {
 
     private static boolean isCompactSource(String source) {
         int braceDepth = 0;
+        boolean inBlockComment = false;
         for (String line : source.split("\\R")) {
             String trimmed = line.stripLeading();
-            if (braceDepth == 0 && !startsWithJavaTypeDeclaration(trimmed) && trimmed.startsWith("void main(")) {
-                return true;
+            if (braceDepth == 0) {
+                if (inBlockComment || trimmed.startsWith("/*")) {
+                    inBlockComment = !trimmed.contains("*/");
+                    continue;
+                }
+                if (isIgnorableTopLevelPrefix(trimmed) || trimmed.startsWith("@")) {
+                    continue;
+                }
+                return !startsWithJavaTypeDeclaration(trimmed);
             }
             braceDepth = updateBraceDepth(braceDepth, line);
         }
         return false;
+    }
+
+    private static boolean isIgnorableTopLevelPrefix(String trimmed) {
+        return trimmed.isEmpty()
+                || trimmed.startsWith("//")
+                || trimmed.startsWith("#!")
+                || trimmed.startsWith("package ")
+                || trimmed.startsWith("import ");
     }
 
     private static int updateBraceDepth(int depth, String line) {
@@ -407,6 +428,7 @@ public final class JbxGraph {
                         || trimmed.isEmpty()
                         || trimmed.startsWith("//")
                         || trimmed.startsWith("#!")
+                        || trimmed.startsWith("package ")
                         || trimmed.startsWith("import ")
                         || trimmed.startsWith("/*");
                 if (prefixLine) {
