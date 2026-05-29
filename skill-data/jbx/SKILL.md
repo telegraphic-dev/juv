@@ -76,10 +76,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 RUSTFLAGS="-D warnings" cargo test --locked
 ```
 
-For docs-only changes, at minimum run:
+For docs-only or website-facing changes, run the docs/website gate:
 
 ```sh
-git diff --check
+scripts/check-docs-website.sh
 git diff --stat
 git status --short
 ```
