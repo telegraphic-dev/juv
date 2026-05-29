@@ -31,7 +31,7 @@ When the PR affects visible behavior:
 
 ## Automated Check
 
-Run from the repository root:
+Run from the repository root when a checkout is available:
 
 ```bash
 scripts/check-docs-website.sh
@@ -39,9 +39,11 @@ scripts/check-docs-website.sh
 
 This script validates whitespace, website generation, install-script shell syntax, and generic bundled skill structure. It is not a substitute for the alignment review above; it catches broken docs/website/skill plumbing, not stale prose.
 
+If the reviewer environment cannot run repository commands because no checkout is available, do not fail solely for that harness limitation. Instead, inspect the diff, GitHub Actions results, and the PR/local verification notes; fail only when the script is reported failing in an available checkout/CI or when the diff itself shows broken plumbing.
+
 ## Verdict Criteria
 
 - **FAIL** if: User-facing CLI/install/docs/skill behavior changed without corresponding README, website, or skill documentation updates.
-- **FAIL** if: `scripts/check-docs-website.sh` fails.
+- **FAIL** if: `scripts/check-docs-website.sh` fails in an available checkout or CI/local verification reports it failed.
 - **WARN** if: Documentation is technically present but examples are incomplete, duplicated, or likely to drift.
 - **PASS** if: Documentation, website content, bundled skills, and automated checks are aligned with the PR.
