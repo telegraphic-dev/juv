@@ -19,6 +19,7 @@ import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.JavaParser;
 import org.openrewrite.java.JavaVisitor;
 import org.openrewrite.java.tree.J;
+import org.openrewrite.java.tree.JavaType;
 
 public final class JbxGraph {
     private static final Pattern TOKEN = Pattern.compile("(\\w+)=\\\"((?:\\\\.|[^\\\"])*)\\\"");
@@ -109,6 +110,9 @@ public final class JbxGraph {
                 String old = literalValue == null ? "null" : literalValue.toString();
                 if (!expected.equals(old)) {
                     throw new IllegalArgumentException("literal #" + id + " expected value \"" + expected + "\" but was \"" + old + "\"");
+                }
+                if (visited.getType() != JavaType.Primitive.String) {
+                    throw new IllegalArgumentException("literal #" + id + " is not a string literal; graph patch currently supports only string literal values");
                 }
                 changed.set(true);
                 return visited.withValue(value).withValueSource(quoteJava(value));
@@ -220,7 +224,7 @@ public final class JbxGraph {
     }
 
     private static String esc(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     private static String unescape(String value) {

@@ -15,6 +15,16 @@ fn assert_success(out: &Output) {
     );
 }
 
+fn assert_failure(out: &Output) {
+    assert!(
+        !out.status.success(),
+        "expected failure\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        out.status,
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 fn graph_hash(output: &str) -> String {
     output
         .lines()
@@ -52,6 +62,34 @@ fn graph_dump_prints_stable_agent_friendly_ast_nodes() {
         "{stdout}"
     );
     assert!(stdout.contains("kind=literal value=\"hello\""), "{stdout}");
+}
+
+#[test]
+fn graph_dump_escapes_tabs_in_literal_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    void main() {\n        String message = \"hello\\tthere\";\n    }\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("kind=literal value=\"hello\\tthere\""),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("hello\tthere"), "{stdout}");
 }
 
 #[test]
@@ -120,4 +158,45 @@ fn graph_patch_updates_string_literal_through_openrewrite_ast() {
     let updated = fs::read_to_string(&source).unwrap();
     assert!(updated.contains("\"goodbye\""), "{updated}");
     assert!(!updated.contains("\"hello\""), "{updated}");
+}
+
+#[test]
+fn graph_patch_rejects_non_string_literals() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    int answer() {\n        return 42;\n    }\n}\n",
+    )
+    .unwrap();
+
+    let dump = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&dump);
+    let stdout = String::from_utf8_lossy(&dump.stdout);
+    let hash = graph_hash(&stdout);
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("patch")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--expect-graph-hash")
+        .arg(hash)
+        .arg("--op")
+        .arg("set node=\"#literal-1\" field=\"value\" expect=\"42\" value=\"99\"")
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_failure(&out);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not a string literal"), "{stderr}");
+    assert!(fs::read_to_string(&source).unwrap().contains("return 42;"));
 }
