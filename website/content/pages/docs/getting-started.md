@@ -21,6 +21,7 @@ jbx run Hello.java world
 jbx build Hello.java
 jbx check src --json
 jbx fmt src
+jbx rewrite patch --recipe auto-format --source src/main/java
 jbx test
 jbx skill get
 ```
@@ -50,6 +51,28 @@ jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 ```
 
 Use `--main` when an artifact exposes more than one entry point.
+
+## OpenRewrite recipes
+
+`jbx rewrite` runs OpenRewrite recipes through jbx-managed dependencies and JDKs. Start with a patch preview:
+
+```bash
+jbx rewrite patch --recipe auto-format --source src/main/java
+jbx rewrite patch --module yaml --recipe org.openrewrite.yaml.format.AutoFormat --source config
+```
+
+Inspect `rewrite/rewrite.patch`, then apply when the change is wanted:
+
+```bash
+jbx rewrite apply --recipe cleanup --source src/main/java
+```
+
+Discovery commands are machine-readable for agents:
+
+```bash
+jbx rewrite modules --search yaml --json
+jbx rewrite recipes yaml --search format --json
+```
 
 ## Documentation sidecars
 

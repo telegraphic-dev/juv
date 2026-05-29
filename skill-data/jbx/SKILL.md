@@ -35,6 +35,10 @@ jbx build <script.java>
 jbx check [path...] [--json]
 jbx test [script.java|directory]
 jbx fmt [path...]
+jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path]
+jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path]
+jbx rewrite modules [--search term] [--json]
+jbx rewrite recipes <short|GAV> [--search term] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx search <text|group:artifact[:version]> [--json]
 jbx resolve <coordinates...>
@@ -52,6 +56,31 @@ jbx jdk install <version>
 ```
 
 Use `--json` when another tool or agent needs stable machine-readable output.
+
+## Source Rewriting
+
+Use `jbx rewrite patch` before mutating sources. It resolves OpenRewrite with jbx-managed dependencies, scans the requested sources, and writes a preview patch to `rewrite/rewrite.patch` without editing files:
+
+```sh
+jbx rewrite patch --recipe auto-format --source src/main/java
+jbx rewrite patch --module yaml --recipe org.openrewrite.yaml.format.AutoFormat --source config
+```
+
+Use `jbx rewrite apply` only after inspecting the patch or when the task explicitly asks for mutation:
+
+```sh
+jbx rewrite apply --recipe cleanup --source src/main/java
+jbx rewrite apply --module org.openrewrite.recipe:rewrite-migrate-java:RELEASE --recipe org.openrewrite.java.migrate.UpgradeToJava21 --source src
+```
+
+Useful discovery commands:
+
+```sh
+jbx rewrite modules --search yaml --json
+jbx rewrite recipes yaml --search format --json
+```
+
+Known recipe aliases include `auto-format`, `cleanup`, `remove-unused-imports`, and `change-package`. Known module aliases include `yaml`, `xml`, `properties`, `json`, `migrate-java`, and `static-analysis`. Java recipe support is built in; extra modules are resolved only when supplied with `--module`.
 
 Publishing requires signing plus Maven Central Portal credentials. Use `--gpg-key <key-id>` for signed Central-ready bundles. Supply either `CENTRAL_TOKEN_USERNAME` plus `CENTRAL_TOKEN_PASSWORD`, or `CENTRAL_PORTAL_TOKEN` as `base64(username:password)`. Use `--skip-signing` only for local inspection, not real publishing.
 

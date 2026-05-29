@@ -41,6 +41,8 @@ If the user has multiple jbx binaries, use the same binary that will run the pro
 jbx <GAV|script.java> [args...]
 jbx check [path...] [--json]
 jbx test [script.java|directory]
+jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path]
+jbx rewrite modules [--search term] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx skill list
 jbx skill get

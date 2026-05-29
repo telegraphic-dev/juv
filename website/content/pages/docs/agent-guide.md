@@ -24,6 +24,9 @@ jbx skill get
 jbx check <path> --json
 jbx search <query> --json
 jbx docs <source|dir|GAV> --json
+jbx rewrite patch --recipe <short|fqn> --source <path>
+jbx rewrite modules --json
+jbx rewrite recipes <short|GAV> --json
 jbx info tools <script.java>
 jbx info deps <script.java>
 jbx info classpath <script.java>
@@ -36,5 +39,7 @@ jbx cache path
 - Start with `jbx skill get` when you need version-matched workflow guidance for the installed binary.
 - Keep local caches between runs where possible; Java dependency downloads are not a personality test.
 - Treat `jbx docs` Markdown as context and `--json` as structured lookup data.
+- Prefer `jbx rewrite patch` over `jbx rewrite apply` until the generated `rewrite/rewrite.patch` has been inspected.
+- Use `jbx rewrite modules --json` and `jbx rewrite recipes <module> --json` to discover OpenRewrite modules and recipes instead of guessing FQNs.
 - Preserve JBang-compatible directives in scripts unless a task explicitly asks to change behavior.
 - When publishing, use dry-run and inspect staged artifacts before real release workflows.
