@@ -94,6 +94,8 @@ enum Commands {
     Fmt(FmtCommand),
     /// Convert Java source to/from JavaParser's native JSON serialization
     Graph(GraphCommand),
+    /// Run OpenRewrite recipes against Java source trees.
+    Rewrite(RewriteCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
 }
@@ -513,6 +515,69 @@ struct FmtCommand {
 struct GraphCommand {
     #[command(subcommand)]
     command: GraphSubcommand,
+}
+
+#[derive(Parser, Debug)]
+struct RewriteCommand {
+    /// OpenRewrite recipe to run (short alias or fully-qualified recipe name). Repeatable and comma-splittable.
+    #[arg(long = "recipe", value_delimiter = ',')]
+    recipes: Vec<String>,
+
+    /// OpenRewrite module to add (short name for org.openrewrite:rewrite-*, or full GAV). Repeatable and comma-splittable.
+    #[arg(long = "module", value_delimiter = ',')]
+    modules: Vec<String>,
+
+    /// Java source file or directory. Repeatable; defaults to the current directory.
+    #[arg(long = "source")]
+    sources: Vec<PathBuf>,
+
+    /// Recipe option as key=value. For multiple recipes, use RecipeName.key=value.
+    #[arg(long = "option")]
+    options: Vec<String>,
+
+    /// Report directory for rewrite.patch.
+    #[arg(long = "report", default_value = "rewrite")]
+    report: PathBuf,
+
+    /// Apply changes. Without this flag jbx only writes rewrite/rewrite.patch.
+    #[arg(long = "apply", conflicts_with = "dry_run")]
+    apply: bool,
+
+    /// Preview changes without writing sources. This is the default.
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+
+    /// Print JSON summary after the human summary.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// Exit with code 2 when recipes would make changes.
+    #[arg(long = "fail-on-changes")]
+    fail_on_changes: bool,
+
+    /// Continue when OpenRewrite reports invalid active recipes.
+    #[arg(long = "no-fail-on-invalid-recipes")]
+    no_fail_on_invalid_recipes: bool,
+
+    /// Discover available recipes instead of running them.
+    #[arg(long = "discover")]
+    discover: bool,
+
+    /// Include recipe descriptions and options with --discover.
+    #[arg(long = "detail")]
+    detail: bool,
+
+    /// Override dependency/helper cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Additional repository for recipe modules.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// OpenRewrite version for built-in modules.
+    #[arg(long = "rewrite-version", default_value = DEFAULT_OPENREWRITE_VERSION)]
+    rewrite_version: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -3801,6 +3866,9 @@ const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
 const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
 const JBX_GRAPH_HELPER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-graph:0.1.1";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
+const DEFAULT_OPENREWRITE_VERSION: &str = "8.56.1";
+const JBX_REWRITE_HELPER_SOURCE: &str = include_str!("rewrite_helper/JbxRewrite.java");
+const JBX_REWRITE_MAIN_CLASS: &str = "dev.telegraphic.jbx.rewrite.JbxRewrite";
 
 #[derive(Debug, Clone)]
 enum FormatterBackend {
@@ -3983,6 +4051,189 @@ fn cache_root(cache_dir: Option<&Path>) -> Result<PathBuf> {
         Some(path) => path.to_path_buf(),
         None => default_cache_dir()?,
     })
+}
+
+struct RewriteBackend {
+    java: PathBuf,
+    classpath: Vec<PathBuf>,
+}
+
+fn run_rewrite(cmd: RewriteCommand) -> Result<i32> {
+    let backend = resolve_rewrite_backend(&cmd)?;
+    let mut args = Vec::new();
+    if cmd.discover {
+        args.push("--discover".to_string());
+        if cmd.detail {
+            args.push("--detail".to_string());
+        }
+    }
+    for recipe in &cmd.recipes {
+        args.push("--recipe".to_string());
+        args.push(rewrite_recipe_name(recipe).to_string());
+    }
+    for source in &cmd.sources {
+        args.push("--source".to_string());
+        args.push(source.to_string_lossy().to_string());
+    }
+    for option in &cmd.options {
+        args.push("--option".to_string());
+        args.push(normalize_rewrite_option(option, &cmd.recipes)?);
+    }
+    args.push("--report".to_string());
+    args.push(cmd.report.to_string_lossy().to_string());
+    if cmd.apply {
+        args.push("--apply".to_string());
+    } else {
+        args.push("--dry-run".to_string());
+    }
+    if cmd.json {
+        args.push("--json".to_string());
+    }
+    if cmd.fail_on_changes {
+        args.push("--fail-on-changes".to_string());
+    }
+    if cmd.no_fail_on_invalid_recipes {
+        args.push("--no-fail-on-invalid-recipes".to_string());
+    }
+
+    let output = run_rewrite_helper(&backend, &args)?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
+    Ok(output.status.code().unwrap_or(1))
+}
+
+fn resolve_rewrite_backend(cmd: &RewriteCommand) -> Result<RewriteBackend> {
+    let repos = maven_tool::maven_repositories(&cmd.repos);
+    let cache = cache_root(cmd.cache_dir.as_deref())?;
+    let deps_cache = cache.join("deps");
+    let mut coordinates = BTreeSet::new();
+    coordinates.insert(format!(
+        "org.openrewrite:rewrite-core:{}",
+        cmd.rewrite_version
+    ));
+    coordinates.insert(format!(
+        "org.openrewrite:rewrite-java:{}",
+        cmd.rewrite_version
+    ));
+    coordinates.insert(format!(
+        "org.openrewrite:rewrite-java-21:{}",
+        cmd.rewrite_version
+    ));
+    coordinates.insert("org.slf4j:slf4j-api:2.0.17".to_string());
+    coordinates.insert("org.slf4j:slf4j-nop:2.0.17".to_string());
+    for module in &cmd.modules {
+        coordinates.insert(rewrite_module_coordinate(module, &cmd.rewrite_version));
+    }
+    let coordinate_vec = coordinates.into_iter().collect::<Vec<_>>();
+    let mut classpath = jbx::resolver::resolve_classpath(&coordinate_vec, &repos, &deps_cache)?;
+    let java_home = jbx::jdk::resolve_jdk(&Some("21".to_string()), true)?;
+    let helper_classes = compile_rewrite_helper(&cache, &classpath, &java_home)?;
+    classpath.push(helper_classes);
+    let java = jbx::jdk::java_bin_path(&java_home);
+    Ok(RewriteBackend { java, classpath })
+}
+
+fn rewrite_module_coordinate(module: &str, version: &str) -> String {
+    if module.contains(':') {
+        module.to_string()
+    } else {
+        format!("org.openrewrite:rewrite-{module}:{version}")
+    }
+}
+
+fn rewrite_recipe_name(recipe: &str) -> &str {
+    match recipe {
+        "auto-format" | "format" => "org.openrewrite.java.format.AutoFormat",
+        "cleanup" => "org.openrewrite.java.cleanup.Cleanup",
+        "remove-unused-imports" => "org.openrewrite.java.RemoveUnusedImports",
+        "change-package" => "org.openrewrite.java.ChangePackage",
+        other => other,
+    }
+}
+
+fn normalize_rewrite_option(option: &str, recipes: &[String]) -> Result<String> {
+    let Some((raw_key, value)) = option.split_once('=') else {
+        anyhow::bail!("rewrite --option must use key=value: {option}");
+    };
+    let key = if recipes.len() == 1
+        && rewrite_recipe_name(&recipes[0]) == "org.openrewrite.java.ChangePackage"
+    {
+        match raw_key {
+            "old" => "oldPackageName",
+            "new" => "newPackageName",
+            other => other,
+        }
+    } else {
+        raw_key
+    };
+    Ok(format!("{key}={value}"))
+}
+
+fn compile_rewrite_helper(
+    cache: &Path,
+    dependency_classpath: &[PathBuf],
+    java_home: &Path,
+) -> Result<PathBuf> {
+    let helper_root = cache.join("rewrite-helper");
+    let source_path = helper_root.join("src/dev/telegraphic/jbx/rewrite/JbxRewrite.java");
+    let classes_dir = helper_root.join("classes");
+    let stamp_path = helper_root.join("JbxRewrite.sha256");
+    let stamp = format!(
+        "{:x}",
+        <sha2::Sha256 as sha2::Digest>::digest(JBX_REWRITE_HELPER_SOURCE.as_bytes())
+    );
+    let current_stamp = fs::read_to_string(&stamp_path).unwrap_or_default();
+    if current_stamp.trim() == stamp
+        && classes_dir
+            .join("dev/telegraphic/jbx/rewrite/JbxRewrite.class")
+            .exists()
+    {
+        return Ok(classes_dir);
+    }
+    fs::create_dir_all(source_path.parent().unwrap())?;
+    fs::create_dir_all(&classes_dir)?;
+    fs::write(&source_path, JBX_REWRITE_HELPER_SOURCE)?;
+    let javac = jbx::jdk::javac_bin_path(java_home);
+    let classpath = std::env::join_paths(dependency_classpath)
+        .context("failed to build rewrite helper compile classpath")?;
+    let output = ProcessCommand::new(&javac)
+        .arg("--release")
+        .arg("17")
+        .arg("-proc:none")
+        .arg("-cp")
+        .arg(classpath)
+        .arg("-d")
+        .arg(&classes_dir)
+        .arg(&source_path)
+        .output()
+        .with_context(|| format!("failed to execute {}", javac.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "failed to compile rewrite helper\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(stamp_path, stamp)?;
+    Ok(classes_dir)
+}
+
+fn run_rewrite_helper(backend: &RewriteBackend, args: &[String]) -> Result<std::process::Output> {
+    let mut command = ProcessCommand::new(&backend.java);
+    command
+        .arg("-Dorg.slf4j.simpleLogger.defaultLogLevel=warn")
+        .arg("-cp")
+        .arg(
+            std::env::join_paths(&backend.classpath)
+                .context("failed to build rewrite helper classpath")?,
+        )
+        .arg(JBX_REWRITE_MAIN_CLASS)
+        .args(args);
+    command
+        .output()
+        .with_context(|| format!("failed to execute {}", backend.java.display()))
 }
 
 struct GraphBackend {
@@ -7020,6 +7271,7 @@ fn main() -> Result<()> {
             GraphSubcommand::Dump(cmd) => run_graph_dump(cmd)?,
             GraphSubcommand::Import(cmd) => run_graph_import(cmd)?,
         },
+        Some(Commands::Rewrite(cmd)) => run_rewrite(cmd)?,
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
                 let jdks = jbx::jdk::list_jdks()?;

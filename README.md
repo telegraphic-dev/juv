@@ -33,8 +33,10 @@ Implemented now:
 - `jbx run <alias>` / `jbx <alias>` run local catalog aliases
 - `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
+- `jbx rewrite --recipe <short|fqn> [--module <short|GAV>] [--source path] [--apply]` runs OpenRewrite recipes against Java source trees; dry-run is the default and writes `rewrite/rewrite.patch`
 - `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
-- `jbx graph import <ast.json> [-o script.java]` convert JavaParser's native AST JSON serialization back to Java source
+- `jbx graph import <ast.json> [-o script.java]` converts JavaParser's native AST JSON serialization back to Java source
+- `jbx rewrite` runs OpenRewrite through jbx-managed dependencies and JDKs. Use `--recipe <short|fqn>` for recipe aliases such as `auto-format`, `cleanup`, `remove-unused-imports`, and `change-package`; use `--module <short|GAV>` for extra OpenRewrite modules (`yaml` expands to `org.openrewrite:rewrite-yaml:<version>`, full GAVs are passed through). Java recipe support is built in, Maven modules are not loaded unless requested. Recipe options use `--option key=value`; `change-package` also accepts `old=` and `new=` aliases. Dry-run is the default and writes `rewrite/rewrite.patch`; pass `--apply` to modify files.
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `jbx export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
