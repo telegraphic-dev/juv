@@ -90,7 +90,7 @@ enum Commands {
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
     Fmt(FmtCommand),
-    /// Dump or patch a JavaParser-derived AST graph.
+    /// Convert Java source to/from JavaParser's native JSON serialization
     Graph(GraphCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
@@ -515,22 +515,14 @@ struct GraphCommand {
 
 #[derive(Subcommand, Debug)]
 enum GraphSubcommand {
-    /// Print a stable, agent-friendly JavaParser AST graph for a Java source file.
+    /// Convert a Java source file to JavaParser's native JSON serialization.
     Dump(GraphDumpCommand),
-    /// Apply checked graph edits through JavaParser and rewrite the Java source file.
-    Patch(GraphPatchCommand),
+    /// Convert JavaParser's native JSON serialization back to Java source.
+    Import(GraphImportCommand),
 }
 
 #[derive(Parser, Debug)]
 struct GraphDumpCommand {
-    /// Print the graph as JSON.
-    #[arg(long = "json")]
-    json: bool,
-
-    /// Print JavaParser's native JSON serialization instead of the jbx graph shape.
-    #[arg(long = "javaparser-json", conflicts_with = "json")]
-    javaparser_json: bool,
-
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
@@ -540,25 +532,17 @@ struct GraphDumpCommand {
 }
 
 #[derive(Parser, Debug)]
-struct GraphPatchCommand {
-    /// Validate --expect-graph-hash against JavaParser's native JSON serialization.
-    #[arg(long = "javaparser-json")]
-    javaparser_json: bool,
-
-    /// Expected graph hash from `jbx graph dump` output.
-    #[arg(long = "expect-graph-hash")]
-    expect_graph_hash: String,
-
-    /// Patch operation, e.g. set node="#literal-1" field="value" expect="old" value="new".
-    #[arg(long = "op")]
-    ops: Vec<String>,
+struct GraphImportCommand {
+    /// Write Java source to this file instead of stdout.
+    #[arg(long = "output", short = 'o')]
+    output: Option<PathBuf>,
 
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
 
-    /// Java source file.
-    script: PathBuf,
+    /// JavaParser JSON file.
+    json: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -3506,8 +3490,6 @@ const JAVAPARSER_GROUP_ID: &str = "com.github.javaparser";
 const JAVAPARSER_ARTIFACT_ID: &str = "javaparser-core";
 const JAVAPARSER_SERIALIZATION_ARTIFACT_ID: &str = "javaparser-core-serialization";
 const JAVAPARSER_JSON_PROVIDER_COORDINATE: &str = "org.eclipse.parsson:parsson:1.1.7";
-const GRAPH_JACKSON_DATABIND_COORDINATE: &str =
-    "com.fasterxml.jackson.core:jackson-databind:2.17.2";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 const JBX_GRAPH_HELPER_SOURCE: &str = include_str!("graph_helper/JbxGraph.java");
 
@@ -3701,13 +3683,7 @@ struct GraphBackend {
 
 fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
     let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
-    let mut args = vec!["dump".to_string(), cmd.script.to_string_lossy().to_string()];
-    if cmd.javaparser_json {
-        args.push("--javaparser-json".to_string());
-    }
-    if cmd.json {
-        args.push("--json".to_string());
-    }
+    let args = vec!["dump".to_string(), cmd.script.to_string_lossy().to_string()];
     let output = run_graph_helper(&backend, &args)?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     if !output.stderr.is_empty() {
@@ -3716,20 +3692,12 @@ fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
     Ok(output.status.code().unwrap_or(1))
 }
 
-fn run_graph_patch(cmd: GraphPatchCommand) -> Result<i32> {
+fn run_graph_import(cmd: GraphImportCommand) -> Result<i32> {
     let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
-    let mut args = vec![
-        "patch".to_string(),
-        cmd.script.to_string_lossy().to_string(),
-        "--expect-graph-hash".to_string(),
-        cmd.expect_graph_hash,
-    ];
-    if cmd.javaparser_json {
-        args.push("--javaparser-json".to_string());
-    }
-    for op in cmd.ops {
-        args.push("--op".to_string());
-        args.push(op);
+    let mut args = vec!["import".to_string(), cmd.json.to_string_lossy().to_string()];
+    if let Some(output) = cmd.output {
+        args.push("--output".to_string());
+        args.push(output.to_string_lossy().to_string());
     }
     let output = run_graph_helper(&backend, &args)?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
@@ -3758,7 +3726,6 @@ fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
         format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_ARTIFACT_ID}:{version}"),
         format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_SERIALIZATION_ARTIFACT_ID}:{version}"),
         JAVAPARSER_JSON_PROVIDER_COORDINATE.to_string(),
-        GRAPH_JACKSON_DATABIND_COORDINATE.to_string(),
     ];
     let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;
     let helper_classes = compile_graph_helper(cache_dir, &classpath)?;
@@ -6806,7 +6773,7 @@ fn main() -> Result<()> {
         Some(Commands::Fmt(cmd)) => run_fmt(cmd)?,
         Some(Commands::Graph(cmd)) => match cmd.command {
             GraphSubcommand::Dump(cmd) => run_graph_dump(cmd)?,
-            GraphSubcommand::Patch(cmd) => run_graph_patch(cmd)?,
+            GraphSubcommand::Import(cmd) => run_graph_import(cmd)?,
         },
         Some(Commands::Jdk(cmd)) => match cmd.command {
             JdkSubcommand::List(_) => {
