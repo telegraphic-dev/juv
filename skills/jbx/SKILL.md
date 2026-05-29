@@ -38,11 +38,13 @@ jbx fmt [path...]
 jbx docs <GAV|source|dir> [--json]
 jbx search <text|group:artifact[:version]> [--json]
 jbx resolve <coordinates...>
+jbx resolve --classpath <coordinates...>
 jbx fetch <coordinates...>
 jbx export local <script.java|alias> [-o app.jar]
 jbx export portable <script.java|alias> [-o app.jar]
 jbx export native <script.java|alias> [-o app]
 jbx publish [script.java] --file jbx.json --dry-run
+jbx publish [script.java] --file jbx.json --publish
 jbx install [script.java] --file jbx.json
 jbx jdk list
 jbx jdk home [version]
