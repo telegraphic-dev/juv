@@ -7305,11 +7305,39 @@ fn check_maven_central() -> DoctorCheck {
 }
 
 fn check_cache_writable(cache_dir: &Path) -> DoctorCheck {
-    let probe = cache_dir.join(".jbx-doctor-write-test");
-    match fs::create_dir_all(cache_dir)
-        .and_then(|_| fs::write(&probe, b"ok"))
-        .and_then(|_| fs::remove_file(&probe))
-    {
+    let result = (|| -> std::io::Result<()> {
+        fs::create_dir_all(cache_dir)?;
+        for attempt in 0..16 {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let probe = cache_dir.join(format!(
+                ".jbx-doctor-write-test-{}-{nonce}-{attempt}",
+                std::process::id()
+            ));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&probe)
+            {
+                Ok(mut file) => {
+                    file.write_all(b"ok")?;
+                    drop(file);
+                    fs::remove_file(&probe)?;
+                    return Ok(());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "could not allocate unique cache write probe path",
+        ))
+    })();
+
+    match result {
         Ok(()) => DoctorCheck::ok("cache", format!("writable at {}", cache_dir.display())),
         Err(error) => DoctorCheck::fail(
             "cache",

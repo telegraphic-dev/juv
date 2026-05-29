@@ -137,3 +137,30 @@ fn doctor_json_reports_version_drift_for_classifier_coordinate() {
         "{drift:#}"
     );
 }
+
+#[test]
+fn doctor_cache_probe_does_not_overwrite_fixed_probe_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fake_jdk = tmp.path().join("jdk-25");
+    fs::create_dir_all(fake_jdk.join("bin")).unwrap();
+    fs::write(fake_jdk.join("bin/java"), b"#!/bin/sh\n").unwrap();
+    fs::write(fake_jdk.join("bin/javac"), b"#!/bin/sh\n").unwrap();
+    fs::write(fake_jdk.join("release"), "JAVA_VERSION=\"25.0.1\"\n").unwrap();
+    let cache = tmp.path().join("cache");
+    fs::create_dir_all(&cache).unwrap();
+    let existing_probe = cache.join(".jbx-doctor-write-test");
+    fs::write(&existing_probe, b"keep me").unwrap();
+
+    let out = jbx_command()
+        .env("JAVA_HOME", &fake_jdk)
+        .env("JBX_MAVEN_SEARCH_URL", serve_maven_search())
+        .arg("doctor")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    assert_eq!(fs::read(&existing_probe).unwrap(), b"keep me");
+}
