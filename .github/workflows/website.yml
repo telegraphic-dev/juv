@@ -31,7 +31,7 @@ jobs:
           node-version: '22'
       - name: Build static website
         working-directory: website
-        run: npm run check
+        run: npm run build
       - name: Configure GitHub Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
