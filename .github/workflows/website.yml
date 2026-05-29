@@ -1,0 +1,44 @@
+name: website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build static website
+        working-directory: website
+        run: npm run check
+      - name: Build Docker image
+        run: docker build -f website/Dockerfile -t ghcr.io/telegraphic-dev/jbx-website:${{ github.sha }} website
+      - name: Login to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker tag ghcr.io/telegraphic-dev/jbx-website:${{ github.sha }} ghcr.io/telegraphic-dev/jbx-website:latest
+          docker push ghcr.io/telegraphic-dev/jbx-website:${{ github.sha }}
+          docker push ghcr.io/telegraphic-dev/jbx-website:latest
