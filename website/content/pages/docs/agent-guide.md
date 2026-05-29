@@ -19,6 +19,8 @@ Use `jbx` as a command-line surface, not as a guessing game. Prefer commands tha
 Prefer these commands for automation:
 
 ```bash
+jbx skill list
+jbx skill get
 jbx check <path> --json
 jbx search <query> --json
 jbx docs <source|dir|GAV> --json
@@ -31,6 +33,7 @@ jbx cache path
 ## Good agent behavior
 
 - Run the tightest command that answers the question.
+- Start with `jbx skill get` when you need version-matched workflow guidance for the installed binary.
 - Keep local caches between runs where possible; Java dependency downloads are not a personality test.
 - Treat `jbx docs` Markdown as context and `--json` as structured lookup data.
 - Preserve JBang-compatible directives in scripts unless a task explicitly asks to change behavior.

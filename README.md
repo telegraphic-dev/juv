@@ -3,6 +3,7 @@
 `jbx` is a Rust-native Java toolbox: JBang-compatible script running, Maven tool execution, testing, formatting, publishing, cache management, and JDK handling behind one CLI.
 
 ```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
 jbx <GAV|script.java> [args...]
 ```
 
@@ -40,6 +41,8 @@ Implemented now:
 - `jbx publish [script.java] --file jbx.json --publish` signs the artifacts, uploads the bundle through the Maven Central Portal API, and waits for publication
 - `jbx publish [script.java] --file jbx.json --serve <port>` serves the prepared artifact from a local Maven-compatible HTTP repository
 - `jbx install [script.java] --file jbx.json [--destination repo]` installs the artifact into a Maven repository layout; default destination is `~/.m2/repository`
+- `jbx skill list` lists version-matched agent skills bundled with this jbx release
+- `jbx skill get [name]` prints a bundled agent skill; defaults to the main `jbx` skill
 - `jbx docs <GAV|source|dir> [--json]` prints agent-friendly documentation; remote `group:artifact` resolves the latest release before fetching sidecars, remote GAV sidecars are cached, local sources are generated fresh
 - `jbx info classpath <script.java>`
 - `jbx info tools <script.java>` with `--select`
@@ -99,6 +102,7 @@ Implemented now:
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port; it also serves artifact-level `maven-metadata.xml` plus checksums so version-less Maven lookups work
 - `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`; it updates `maven-metadata-local.xml` for the installed artifact
+- `jbx skill list` and `jbx skill get [name]` expose version-matched agent guidance bundled with the binary from editable `skill-data/` files
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
 - `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape

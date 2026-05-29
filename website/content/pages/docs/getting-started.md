@@ -7,12 +7,19 @@ description: Basic command examples for jbx.
 
 `jbx` accepts either a Java script path or a Maven coordinate.
 
+Install it:
+
+```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
+```
+
 ```bash
 jbx run Hello.java world
 jbx build Hello.java
 jbx check src --json
 jbx fmt src
 jbx test
+jbx skill get
 ```
 
 ## Java scripts
