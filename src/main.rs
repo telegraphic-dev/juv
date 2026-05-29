@@ -1615,7 +1615,8 @@ fn run_search(cmd: SearchCommand) -> Result<i32> {
         .unwrap_or_default();
     let total_found_fallback = docs.len() as u64;
     let mut artifacts = docs.iter().map(search_doc_json).collect::<Vec<_>>();
-    sort_search_artifacts_by_popularity(&mut artifacts);
+    let exact_artifact_id = maven_search_exact_artifact_id(&cmd);
+    sort_search_artifacts_by_popularity(&mut artifacts, exact_artifact_id.as_deref());
     artifacts.truncate(cmd.limit);
     if cmd.json {
         let payload = serde_json::json!({
@@ -1692,18 +1693,51 @@ fn maven_search_query(cmd: &SearchCommand) -> Result<(String, bool)> {
     Ok((raw, false))
 }
 
-fn sort_search_artifacts_by_popularity(artifacts: &mut [serde_json::Value]) {
+fn maven_search_exact_artifact_id(cmd: &SearchCommand) -> Option<String> {
+    if let Some(id) = cmd.id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+        return Some(id.to_string());
+    }
+
+    let raw = cmd.query.join(" ");
+    let raw = raw.trim();
+    if raw.is_empty() || raw.split_whitespace().count() > 1 {
+        return None;
+    }
+
+    let coord_parts = raw.split(':').collect::<Vec<_>>();
+    if (coord_parts.len() == 2 || coord_parts.len() == 3)
+        && coord_parts.iter().all(|part| !part.trim().is_empty())
+    {
+        return Some(coord_parts[1].trim().to_string());
+    }
+
+    if raw.contains(':') {
+        None
+    } else {
+        Some(raw.to_string())
+    }
+}
+
+fn sort_search_artifacts_by_popularity(
+    artifacts: &mut [serde_json::Value],
+    exact_artifact_id: Option<&str>,
+) {
     artifacts.sort_by(|left, right| {
-        let left_versions = left
-            .get("versionCount")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(1);
-        let right_versions = right
-            .get("versionCount")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(1);
-        right_versions
-            .cmp(&left_versions)
+        let left_exact = search_artifact_id_matches(left, exact_artifact_id);
+        let right_exact = search_artifact_id_matches(right, exact_artifact_id);
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| {
+                let left_versions = left
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1);
+                let right_versions = right
+                    .get("versionCount")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1);
+                right_versions.cmp(&left_versions)
+            })
             .then_with(|| {
                 let left_timestamp = left
                     .get("timestamp")
@@ -1717,6 +1751,21 @@ fn sort_search_artifacts_by_popularity(artifacts: &mut [serde_json::Value]) {
             })
             .then_with(|| search_artifact_name(left).cmp(&search_artifact_name(right)))
     });
+}
+
+fn search_artifact_id_matches(
+    artifact: &serde_json::Value,
+    exact_artifact_id: Option<&str>,
+) -> bool {
+    exact_artifact_id
+        .and_then(|id| {
+            artifact
+                .get("artifactId")
+                .or_else(|| artifact.get("a"))
+                .and_then(|value| value.as_str())
+                .map(|artifact_id| artifact_id.eq_ignore_ascii_case(id))
+        })
+        .unwrap_or(false)
 }
 
 fn print_search_table(artifacts: &[serde_json::Value]) {

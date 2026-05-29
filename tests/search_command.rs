@@ -199,6 +199,48 @@ fn search_ignores_empty_version_filter_without_switching_to_gav_core() {
 }
 
 #[test]
+fn search_keeps_exact_artifact_id_matches_above_popularity_sort() {
+    let (base, _requests, handle) = serve_search_response(
+        r#"{
+  "response": {
+    "numFound": 3,
+    "docs": [
+      {"id":"io.micronaut.spring:micronaut-spring-web","g":"io.micronaut.spring","a":"micronaut-spring-web","latestVersion":"5.11.0","p":"jar","versionCount": 58},
+      {"id":"io.micronaut:micronaut-spring","g":"io.micronaut","a":"micronaut-spring","latestVersion":"2.0.1","p":"jar","versionCount": 44},
+      {"id":"io.github.crac.io.micronaut:micronaut-spring","g":"io.github.crac.io.micronaut","a":"micronaut-spring","latestVersion":"1.3.7","p":"jar","versionCount": 1}
+    ]
+  }
+}"#,
+    );
+
+    let output = jbx_command()
+        .arg("search")
+        .arg("micronaut-spring")
+        .arg("--limit")
+        .arg("3")
+        .env("JBX_MAVEN_SEARCH_URL", base)
+        .output()
+        .expect("failed to run jbx search");
+
+    assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert!(
+        lines[1].starts_with("io.micronaut:micronaut-spring"),
+        "{stdout}"
+    );
+    assert!(
+        lines[2].starts_with("io.github.crac.io.micronaut:micronaut-spring"),
+        "{stdout}"
+    );
+    assert!(
+        lines[3].starts_with("io.micronaut.spring:micronaut-spring-web"),
+        "{stdout}"
+    );
+    handle.join().unwrap();
+}
+
+#[test]
 fn search_json_num_found_fallback_uses_untruncated_docs() {
     let (base, _requests, handle) = serve_search_response(
         r#"{
