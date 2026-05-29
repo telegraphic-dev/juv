@@ -14,10 +14,11 @@ use std::{
 use jbx::{
     alias_add, alias_remove, app_bin_dir, app_install, app_list, app_uninstall, build_java,
     cache_entries, catalog_add, catalog_aliases, catalog_refs, catalog_templates, clear_cache,
-    default_cache_dir, export_jar, export_native, init_script, maven_tool, resolve_catalog_alias,
-    run_java, split_directive_words, trust_add, trust_clear, trust_entries, trust_remove,
-    AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions, CatalogAddOptions,
-    ExportKind, ExportOptions, InitOptions, KeyValue, NativeExportOptions, RunOptions,
+    default_cache_dir, export_jar, export_native, init_script, maven_tool, parse_directives,
+    resolve_catalog_alias, run_java, split_directive_words, trust_add, trust_clear, trust_entries,
+    trust_remove, AliasAddOptions, AliasRemoveOptions, AppInstallOptions, BuildOptions,
+    CatalogAddOptions, ExportKind, ExportOptions, InitOptions, KeyValue, NativeExportOptions,
+    RunOptions,
 };
 
 #[derive(Parser, Debug)]
@@ -72,6 +73,8 @@ enum Commands {
     Trust(TrustCommand),
     /// Print parsed JBang directives.
     Info(InfoCommand),
+    /// Diagnose the local jbx toolchain and a script when provided.
+    Doctor(DoctorCommand),
     /// Manage scripts installed as commands on PATH.
     App(AppCommand),
     /// Manage aliases from jbang-catalog.json.
@@ -509,6 +512,32 @@ struct FmtCommand {
     /// Java source files or directories. Defaults to the current directory.
     #[arg(default_value = ".")]
     paths: Vec<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct DoctorCommand {
+    /// Emit structured JSON.
+    #[arg(long = "json")]
+    json: bool,
+
+    /// Override cache directory checked for writability and dependency metadata.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
+
+    /// Additional repository for dependency resolution health checks.
+    #[arg(long = "repo", alias = "repos")]
+    repos: Vec<String>,
+
+    /// Check GPG signing tools too. By default GPG is skipped unless publishing is requested.
+    #[arg(long = "publish")]
+    publish: bool,
+
+    /// Check native-image too. By default native-image is skipped unless native export is requested.
+    #[arg(long = "native")]
+    native: bool,
+
+    /// Java source file or remote URL to diagnose.
+    target: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -6607,6 +6636,466 @@ fn run_skill(cmd: SkillCommand) -> Result<i32> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DoctorStatus {
+    Ok,
+    Warn,
+    Fail,
+    Skipped,
+}
+
+impl DoctorStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            DoctorStatus::Ok => "ok",
+            DoctorStatus::Warn => "warn",
+            DoctorStatus::Fail => "fail",
+            DoctorStatus::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DoctorCheck {
+    name: &'static str,
+    status: DoctorStatus,
+    summary: String,
+    detail: Option<String>,
+}
+
+impl DoctorCheck {
+    fn ok(name: &'static str, summary: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: DoctorStatus::Ok,
+            summary: summary.into(),
+            detail: None,
+        }
+    }
+
+    fn warn(name: &'static str, summary: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: DoctorStatus::Warn,
+            summary: summary.into(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn fail(name: &'static str, summary: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: DoctorStatus::Fail,
+            summary: summary.into(),
+            detail: Some(detail.into()),
+        }
+    }
+
+    fn skipped(name: &'static str, summary: impl Into<String>) -> Self {
+        Self {
+            name,
+            status: DoctorStatus::Skipped,
+            summary: summary.into(),
+            detail: None,
+        }
+    }
+
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "status": self.status.as_str(),
+            "summary": self.summary,
+            "detail": self.detail,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+struct DoctorContext {
+    target: Option<String>,
+    directives: Option<jbx::Directives>,
+    target_error: Option<String>,
+    target_is_remote: bool,
+}
+
+fn run_doctor(cmd: DoctorCommand) -> Result<i32> {
+    let cache_dir = cmd.cache_dir.clone().unwrap_or(default_cache_dir()?);
+    let context = doctor_context(cmd.target.as_deref());
+    let mut checks = vec![
+        check_jdk(&context),
+        check_maven_central(),
+        check_cache_writable(&cache_dir),
+        check_gpg(cmd.publish || context.directives.as_ref().is_some_and(|d| d.gav.is_some())),
+        check_native_image(cmd.native),
+        check_formatter(),
+        check_trust(&context, cmd.cache_dir.as_deref()),
+        check_dependency_resolution(&context, &cmd.repos, &cache_dir),
+    ];
+    checks.extend(check_dependency_versions(&context));
+    checks.push(check_jbx_update());
+    if let Some(error) = context.target_error.as_ref() {
+        checks.push(DoctorCheck::fail(
+            "script",
+            "target script could not be read",
+            error.clone(),
+        ));
+    }
+
+    if cmd.json {
+        let payload = serde_json::json!({
+            "status": doctor_overall_status(&checks).as_str(),
+            "target": context.target,
+            "checks": checks.iter().map(DoctorCheck::json).collect::<Vec<_>>(),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        for check in &checks {
+            println!(
+                "{:<7} {} - {}",
+                check.status.as_str(),
+                check.name,
+                check.summary
+            );
+            if let Some(detail) = &check.detail {
+                println!("        {detail}");
+            }
+        }
+    }
+
+    Ok(
+        if checks
+            .iter()
+            .any(|check| check.status == DoctorStatus::Fail)
+        {
+            1
+        } else {
+            0
+        },
+    )
+}
+
+fn doctor_context(target: Option<&str>) -> DoctorContext {
+    let Some(target) = target else {
+        return DoctorContext::default();
+    };
+    let target_is_remote = is_probably_remote_url(target);
+    let mut context = DoctorContext {
+        target: Some(target.to_string()),
+        target_is_remote,
+        ..DoctorContext::default()
+    };
+    if target_is_remote {
+        return context;
+    }
+    match fs::read_to_string(target) {
+        Ok(source) => context.directives = Some(parse_directives(&source)),
+        Err(error) => context.target_error = Some(error.to_string()),
+    }
+    context
+}
+
+fn check_jdk(context: &DoctorContext) -> DoctorCheck {
+    let requested = context
+        .directives
+        .as_ref()
+        .and_then(|directives| directives.java_version.as_deref())
+        .unwrap_or("25");
+    match jbx::jdk::parse_java_version_directive(requested)
+        .and_then(|version| jbx::jdk::find_jdk(version, false).map(|root| (version, root)))
+    {
+        Ok((version, root)) => DoctorCheck::ok(
+            "jdk",
+            format!("JDK {version} selected at {}", root.display()),
+        ),
+        Err(error) => DoctorCheck::fail(
+            "jdk",
+            format!("requested JDK {requested} is not available locally"),
+            format!("{error}; jbx can try to provision it when a command enables auto-install"),
+        ),
+    }
+}
+
+fn check_maven_central() -> DoctorCheck {
+    let endpoint = maven_search_endpoint();
+    match ureq::get(&endpoint)
+        .query(
+            "q",
+            "g:org.junit.platform AND a:junit-platform-console-standalone",
+        )
+        .query("rows", "1")
+        .query("wt", "json")
+        .set("User-Agent", "jbx")
+        .call()
+    {
+        Ok(response) if (200..300).contains(&response.status()) => {
+            DoctorCheck::ok("maven-central", format!("reachable via {endpoint}"))
+        }
+        Ok(response) => DoctorCheck::fail(
+            "maven-central",
+            format!("unexpected HTTP {} from {endpoint}", response.status()),
+            response.status_text().to_string(),
+        ),
+        Err(error) => DoctorCheck::fail(
+            "maven-central",
+            format!("could not reach {endpoint}"),
+            error.to_string(),
+        ),
+    }
+}
+
+fn check_cache_writable(cache_dir: &Path) -> DoctorCheck {
+    let probe = cache_dir.join(".jbx-doctor-write-test");
+    match fs::create_dir_all(cache_dir)
+        .and_then(|_| fs::write(&probe, b"ok"))
+        .and_then(|_| fs::remove_file(&probe))
+    {
+        Ok(()) => DoctorCheck::ok("cache", format!("writable at {}", cache_dir.display())),
+        Err(error) => DoctorCheck::fail(
+            "cache",
+            format!("not writable at {}", cache_dir.display()),
+            error.to_string(),
+        ),
+    }
+}
+
+fn check_gpg(required: bool) -> DoctorCheck {
+    if !required {
+        return DoctorCheck::skipped("gpg", "not needed unless publishing");
+    }
+    match command_version("gpg") {
+        Some(version) => DoctorCheck::ok("gpg", first_line(&version)),
+        None => DoctorCheck::fail(
+            "gpg",
+            "required for publishing but not available",
+            "install gpg or use publish dry-run/skip-signing paths where appropriate",
+        ),
+    }
+}
+
+fn check_native_image(required: bool) -> DoctorCheck {
+    if !required {
+        return DoctorCheck::skipped(
+            "native-image",
+            "not needed unless native export is requested",
+        );
+    }
+    match command_version("native-image") {
+        Some(version) => DoctorCheck::ok("native-image", first_line(&version)),
+        None => DoctorCheck::fail(
+            "native-image",
+            "required for native export but not available",
+            "install GraalVM native-image or pass --native-image to export native",
+        ),
+    }
+}
+
+fn check_formatter() -> DoctorCheck {
+    if command_exists("google-java-format") {
+        return DoctorCheck::ok("formatter", "google-java-format found on PATH");
+    }
+    if command_exists("palantir-java-format") {
+        return DoctorCheck::ok("formatter", "palantir-java-format found on PATH");
+    }
+    DoctorCheck::ok(
+        "formatter",
+        format!("PATH formatter not found; jbx fmt can resolve Palantir Java Format {DEFAULT_PALANTIR_JAVA_FORMAT_VERSION} from Maven Central"),
+    )
+}
+
+fn check_trust(context: &DoctorContext, cache_dir: Option<&Path>) -> DoctorCheck {
+    if !context.target_is_remote {
+        return DoctorCheck::skipped("trust", "target is not a remote script");
+    }
+    let Some(target) = context.target.as_deref() else {
+        return DoctorCheck::skipped("trust", "no target script provided");
+    };
+    match trust_entries(cache_dir) {
+        Ok(entries) if entries.iter().any(|(url, _)| url == target) => {
+            DoctorCheck::ok("trust", "remote script has a trusted content hash")
+        }
+        Ok(_) => DoctorCheck::warn(
+            "trust",
+            "remote script is not trusted yet",
+            "run with --trust or use `jbx trust add <url>` after reviewing the script",
+        ),
+        Err(error) => DoctorCheck::fail("trust", "could not read trust store", error.to_string()),
+    }
+}
+
+fn check_dependency_resolution(
+    context: &DoctorContext,
+    repos: &[String],
+    cache_dir: &Path,
+) -> DoctorCheck {
+    let Some(directives) = context.directives.as_ref() else {
+        return DoctorCheck::skipped(
+            "dependency-resolution",
+            "no local script dependencies to resolve",
+        );
+    };
+    if directives.deps.is_empty() {
+        return DoctorCheck::ok("dependency-resolution", "script declares no dependencies");
+    }
+    let mut all_repos = directives.repos.clone();
+    all_repos.extend(repos.iter().cloned());
+    let repositories = maven_tool::maven_repositories(&all_repos);
+    match jbx::resolver::resolve(&directives.deps, &repositories, &cache_dir.join("deps")) {
+        Ok(artifacts) => DoctorCheck::ok(
+            "dependency-resolution",
+            format!(
+                "resolved {} artifact(s) from {} declared dependency/dependencies",
+                artifacts.len(),
+                directives.deps.len()
+            ),
+        ),
+        Err(error) => DoctorCheck::fail(
+            "dependency-resolution",
+            "dependency resolution failed",
+            error.to_string(),
+        ),
+    }
+}
+
+fn check_dependency_versions(context: &DoctorContext) -> Vec<DoctorCheck> {
+    let Some(directives) = context.directives.as_ref() else {
+        return Vec::new();
+    };
+    directives
+        .deps
+        .iter()
+        .filter_map(|coordinate| dependency_version_check(coordinate))
+        .collect()
+}
+
+fn dependency_version_check(coordinate: &str) -> Option<DoctorCheck> {
+    let parts = coordinate.split(':').collect::<Vec<_>>();
+    if parts.len() < 3 || parts.iter().any(|part| part.trim().is_empty()) {
+        return Some(DoctorCheck::fail(
+            "dependency-version",
+            format!("invalid dependency coordinate: {coordinate}"),
+            "expected groupId:artifactId:version, optionally with classifier syntax supported by resolver".to_string(),
+        ));
+    }
+    let group = parts[0].trim();
+    let artifact = parts[1].trim();
+    let version = parts.last()?.trim();
+    latest_maven_version(group, artifact).map(|latest| {
+        if latest == version {
+            DoctorCheck::ok(
+                "dependency-version",
+                format!("{group}:{artifact} is current at {version}"),
+            )
+        } else {
+            DoctorCheck::warn(
+                "dependency-version",
+                format!("{group}:{artifact} declares {version}; latest appears to be {latest}"),
+                "not every project should chase latest, but this is useful drift signal"
+                    .to_string(),
+            )
+        }
+    })
+}
+
+fn check_jbx_update() -> DoctorCheck {
+    let current = env!("CARGO_PKG_VERSION");
+    if current == "0.0.0" {
+        return DoctorCheck::skipped(
+            "jbx-update",
+            "source build uses placeholder version 0.0.0; release builds derive version from tags",
+        );
+    }
+    match latest_github_release_version() {
+        Some(latest) if latest.trim_start_matches('v') == current => {
+            DoctorCheck::ok("jbx-update", format!("jbx {current} is current"))
+        }
+        Some(latest) => DoctorCheck::warn(
+            "jbx-update",
+            format!("jbx {current} is older than {latest}"),
+            "upgrade from the latest GitHub release",
+        ),
+        None => DoctorCheck::warn(
+            "jbx-update",
+            "could not check latest jbx release",
+            "GitHub releases API was unavailable or returned no release",
+        ),
+    }
+}
+
+fn latest_maven_version(group: &str, artifact: &str) -> Option<String> {
+    let response = ureq::get(&maven_search_endpoint())
+        .query("q", &format!("g:{group} AND a:{artifact}"))
+        .query("rows", "1")
+        .query("wt", "json")
+        .set("User-Agent", "jbx")
+        .call()
+        .ok()?;
+    if !(200..300).contains(&response.status()) {
+        return None;
+    }
+    let body = response.into_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    json.get("response")?
+        .get("docs")?
+        .as_array()?
+        .first()?
+        .get("latestVersion")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+fn latest_github_release_version() -> Option<String> {
+    let response = ureq::get("https://api.github.com/repos/telegraphic-dev/jbx/releases/latest")
+        .set("User-Agent", "jbx")
+        .call()
+        .ok()?;
+    if !(200..300).contains(&response.status()) {
+        return None;
+    }
+    let body = response.into_string().ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    json.get("tag_name")?.as_str().map(ToOwned::to_owned)
+}
+
+fn command_exists(name: &str) -> bool {
+    which::which(name).is_ok()
+}
+
+fn command_version(name: &str) -> Option<String> {
+    let output = ProcessCommand::new(name).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    if text.trim().is_empty() {
+        text = String::from_utf8_lossy(&output.stderr).to_string();
+    }
+    Some(text)
+}
+
+fn first_line(text: &str) -> String {
+    text.lines().next().unwrap_or(text).trim().to_string()
+}
+
+fn doctor_overall_status(checks: &[DoctorCheck]) -> DoctorStatus {
+    if checks
+        .iter()
+        .any(|check| check.status == DoctorStatus::Fail)
+    {
+        DoctorStatus::Fail
+    } else if checks
+        .iter()
+        .any(|check| check.status == DoctorStatus::Warn)
+    {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Ok
+    }
+}
+
+fn is_probably_remote_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://")
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let code = match cli.command {
@@ -6715,6 +7204,7 @@ fn main() -> Result<()> {
                 0
             }
         },
+        Some(Commands::Doctor(cmd)) => run_doctor(cmd)?,
         Some(Commands::Info(cmd)) => match cmd.command {
             InfoSubcommand::Classpath(cmd) => {
                 let output = build_java(BuildOptions {

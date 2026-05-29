@@ -37,6 +37,7 @@ Implemented now:
 - `jbx run <alias>` / `jbx <alias>` run local catalog aliases
 - `jbx test [script.java|directory]` run JUnit tests with the standalone console launcher
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
+- `jbx doctor [script.java|url] [--json]` diagnoses JDK selection, Maven Central reachability, cache writability, formatter fallback, remote trust, dependency resolution/version drift, and context-only tools such as GPG/native-image
 - `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
 - `jbx graph import <ast.json> [-o script.java]` convert JavaParser's native AST JSON serialization back to Java source
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
@@ -97,6 +98,7 @@ Implemented now:
 - `jbx info deps`, `repos`, `sources`, and `files` print directive collections one-per-line
 - `jbx info compile-options`, `runtime-options`, `native-options`, `javaagents`, and `manifest` print advanced directive collections
 - `jbx info cache` prints the effective cache directory
+- `jbx doctor [script.java|url]` prints human-readable environment diagnostics; `--json` emits structured checks for agents and CI
 - CLI overrides for `--deps`, `--repo`, `--source`, `--files`, `--java`, `--main`, `--compile-option`, `--java-option`, and `--javaagent`
 - local and imported catalog aliases from `jbang-catalog.json` / `.jbang/jbang-catalog.json`, including `alias add/remove`, `catalog add/list`, `base-ref`, `script-ref`, `catalog-ref`, `import`, `arguments`, `dependencies`, `repositories`, `sources`, `files`, classpaths, Java/runtime/compile options, agents, Java version, and main-class metadata
 - imported catalog templates with `file-refs` and default `properties`, usable via `jbx init --template <name>`
