@@ -21,6 +21,7 @@ jbx run Hello.java world
 jbx build Hello.java
 jbx check src --json
 jbx fmt src
+jbx doctor --json
 jbx rewrite patch --recipe auto-format --source src/main/java --json
 jbx test
 jbx test --coverage   # writes target/site/jacoco/index.html and jacoco.xml
@@ -44,6 +45,19 @@ Run it:
 ```bash
 jbx Hello.java world
 ```
+
+## Diagnostics
+
+Use `jbx doctor` when a script, cache, toolchain, or dependency resolution path behaves oddly:
+
+```bash
+jbx doctor
+jbx doctor --json
+jbx doctor Hello.java --json
+jbx doctor https://example.com/Hello.java --cache-dir .jbx-cache --repo snapshots=https://repo.example.test/maven --publish --native
+```
+
+The command checks the selected JDK, Maven Central reachability, cache writability, formatter availability and fallback, remote script trust, dependency resolution health, dependency version drift, and whether a newer `jbx` release exists. GPG and GraalVM `native-image` are contextual: they are skipped by default and checked when `--publish` or `--native` asks for them.
 
 ## Maven tools
 

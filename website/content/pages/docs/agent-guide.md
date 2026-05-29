@@ -24,6 +24,7 @@ jbx skill get
 jbx check <path> --json
 jbx search <query> --json
 jbx docs <source|dir|GAV> --json
+jbx doctor [script.java|url] --json
 jbx rewrite patch --recipe <short|fqn> --source <path> --json
 jbx rewrite modules --json
 jbx rewrite recipes <short|GAV> --detail --json
@@ -36,6 +37,7 @@ jbx cache path
 ## Good agent behavior
 
 - Run the tightest command that answers the question.
+- Use `jbx doctor --json` before guessing about broken JDKs, unreachable Maven metadata, unwritable caches, formatter fallback, remote trust, dependency resolution, or optional publishing/native toolchain setup. Add `--cache-dir` for isolated agent runs, `--repo`/`--repos` for extra repositories, `--publish` for GPG checks, and `--native` for GraalVM `native-image` checks.
 - Start with `jbx skill get` when you need version-matched workflow guidance for the installed binary.
 - Keep local caches between runs where possible; Java dependency downloads are not a personality test.
 - Treat `jbx docs` Markdown as context and `--json` as structured lookup data.
