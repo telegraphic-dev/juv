@@ -90,7 +90,7 @@ enum Commands {
     Test(TestCommand),
     /// Format Java source files with Palantir Java Format.
     Fmt(FmtCommand),
-    /// Dump or patch an OpenRewrite-derived AST graph.
+    /// Dump or patch a JavaParser-derived AST graph.
     Graph(GraphCommand),
     /// Manage installed JDKs.
     Jdk(JdkCommand),
@@ -515,9 +515,9 @@ struct GraphCommand {
 
 #[derive(Subcommand, Debug)]
 enum GraphSubcommand {
-    /// Print a stable, agent-friendly OpenRewrite AST graph for a Java source file.
+    /// Print a stable, agent-friendly JavaParser AST graph for a Java source file.
     Dump(GraphDumpCommand),
-    /// Apply checked graph edits through OpenRewrite and rewrite the Java source file.
+    /// Apply checked graph edits through JavaParser and rewrite the Java source file.
     Patch(GraphPatchCommand),
 }
 
@@ -3493,11 +3493,13 @@ const PALANTIR_MAIN_CLASS: &str = "com.palantir.javaformat.java.Main";
 const COMPACT_WRAPPER_CLASS: &str = "__JuvFormatterWrapper";
 const PALANTIR_GROUP_ID: &str = "com.palantir.javaformat";
 const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
-const DEFAULT_OPENREWRITE_VERSION: &str = "8.83.4";
-const OPENREWRITE_GROUP_ID: &str = "org.openrewrite";
-const OPENREWRITE_ARTIFACT_ID: &str = "rewrite-java";
-const GRAPH_SLF4J_API_COORDINATE: &str = "org.slf4j:slf4j-api:2.0.17";
-const GRAPH_SLF4J_SIMPLE_COORDINATE: &str = "org.slf4j:slf4j-simple:2.0.17";
+const DEFAULT_JAVAPARSER_VERSION: &str = "3.28.1";
+const JAVAPARSER_GROUP_ID: &str = "com.github.javaparser";
+const JAVAPARSER_ARTIFACT_ID: &str = "javaparser-core";
+const JAVAPARSER_SERIALIZATION_COORDINATE: &str =
+    "com.github.javaparser:javaparser-core-serialization:3.28.1";
+const GRAPH_JACKSON_DATABIND_COORDINATE: &str =
+    "com.fasterxml.jackson.core:jackson-databind:2.17.2";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
 const JBX_GRAPH_HELPER_SOURCE: &str = include_str!("graph_helper/JbxGraph.java");
 
@@ -3727,23 +3729,21 @@ fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
     let repos = vec![jbx::resolver::Repository::central()];
     let version = latest_cached_tool_version(
         cache_dir,
-        OPENREWRITE_GROUP_ID,
-        OPENREWRITE_ARTIFACT_ID,
+        JAVAPARSER_GROUP_ID,
+        JAVAPARSER_ARTIFACT_ID,
         &repos,
     )
     .unwrap_or_else(|err| {
         eprintln!(
-            "warning: could not determine latest OpenRewrite version: {err:#}; using {DEFAULT_OPENREWRITE_VERSION}"
+            "warning: could not determine latest JavaParser version: {err:#}; using {DEFAULT_JAVAPARSER_VERSION}"
         );
-        DEFAULT_OPENREWRITE_VERSION.to_string()
+        DEFAULT_JAVAPARSER_VERSION.to_string()
     });
     let cache = cache_root(cache_dir)?.join("deps");
     let coordinates = [
-        format!("org.openrewrite:rewrite-java:{version}"),
-        format!("org.openrewrite:rewrite-java-21:{version}"),
-        format!("org.openrewrite:rewrite-java-25:{version}"),
-        GRAPH_SLF4J_API_COORDINATE.to_string(),
-        GRAPH_SLF4J_SIMPLE_COORDINATE.to_string(),
+        format!("com.github.javaparser:javaparser-core:{version}"),
+        JAVAPARSER_SERIALIZATION_COORDINATE.to_string(),
+        GRAPH_JACKSON_DATABIND_COORDINATE.to_string(),
     ];
     let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;
     let helper_classes = compile_graph_helper(cache_dir, &classpath)?;
@@ -3793,7 +3793,7 @@ fn compile_graph_helper(
         .with_context(|| format!("failed to execute {}", javac.display()))?;
     if !output.status.success() {
         anyhow::bail!(
-            "failed to compile jbx graph OpenRewrite helper\n{}{}",
+            "failed to compile jbx graph JavaParser helper\n{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

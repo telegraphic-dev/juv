@@ -155,7 +155,7 @@ fn graph_dump_handles_java25_module_import_compact_source() {
 }
 
 #[test]
-fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
+fn graph_dump_handles_compact_source_without_parser_noise() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("nanocode_basic.java");
     fs::write(
@@ -177,6 +177,7 @@ fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.starts_with("jbx-graph v1\ngraph-hash "), "{stdout}");
+    assert!(!stdout.contains("$COMPACT_CLASS"), "{stdout}");
     assert!(stdout.contains("kind=method name=\"main\""), "{stdout}");
     assert!(
         stdout.contains("kind=variable name=\"message\""),
@@ -241,6 +242,7 @@ fn graph_dump_json_prints_ast_nodes() {
         .unwrap();
 
     assert_success(&out);
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("$COMPACT_CLASS"));
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["version"], "jbx-graph v1");
     assert_eq!(value["path"], source.to_string_lossy().as_ref());
@@ -291,7 +293,7 @@ fn graph_dump_json_escapes_control_characters() {
 }
 
 #[test]
-fn graph_patch_updates_string_literal_through_openrewrite_ast() {
+fn graph_patch_updates_string_literal_through_javaparser_ast() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");
     fs::write(

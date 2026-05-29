@@ -1,32 +1,40 @@
 package dev.telegraphic.jbx.graph;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ParseStart;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.Providers;
+import com.github.javaparser.Range;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.RecordDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.github.javaparser.ast.expr.LiteralStringValueExpr;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.openrewrite.ExecutionContext;
-import org.openrewrite.InMemoryExecutionContext;
-import org.openrewrite.SourceFile;
-import org.openrewrite.java.JavaIsoVisitor;
-import org.openrewrite.java.JavaParser;
-import org.openrewrite.java.JavaVisitor;
-import org.openrewrite.java.tree.J;
-import org.openrewrite.java.tree.JavaType;
 
 public final class JbxGraph {
     private static final Pattern TOKEN = Pattern.compile("(\\w+)=\\\"((?:\\\\.|[^\\\"])*)\\\"");
-    private static final String COMPACT_WRAPPER_CLASS = "__JbxCompactSource";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private JbxGraph() {}
@@ -72,33 +80,33 @@ public final class JbxGraph {
             System.err.println("graph patch requires at least one --op");
             System.exit(2);
         }
-        String graph = dump(source, false);
+
+        ParsedSource parsed = parse(source);
+        String graph = textGraph(source, graphHash(graphBody(source, collectNodes(parsed))), collectNodes(parsed));
         String actualHash = graphHash(graph);
         if (!expectedHash.equals(actualHash)) {
             System.err.println("graph hash mismatch: expected " + expectedHash + " but was " + actualHash);
             System.exit(1);
         }
-        ParsedSource parsed = parse(source);
-        SourceFile sourceFile = parsed.sourceFile();
+
+        CompilationUnit cu = parsed.compilationUnit();
+        List<GraphNode> nodes = collectNodes(parsed);
         for (String op : ops) {
-            sourceFile = applySetLiteralValue(sourceFile, op);
+            applySetLiteralValue(cu, nodes, op);
+            nodes = collectNodes(new ParsedSource(cu, parsed.text()));
         }
-        String printed = sourceFile.printAll();
-        if (parsed.compact()) {
-            printed = unwrapCompactSource(printed);
-        }
-        Files.writeString(source, printed, StandardCharsets.UTF_8);
+        Files.writeString(source, cu.toString(), StandardCharsets.UTF_8);
         System.out.println("patched " + source);
     }
 
-    private static SourceFile applySetLiteralValue(SourceFile sourceFile, String opText) {
+    private static void applySetLiteralValue(CompilationUnit cu, List<GraphNode> nodes, String opText) {
         Map<String, String> op = parseOperation(opText);
         if (!"set".equals(op.get("kind"))) {
             throw new IllegalArgumentException("unsupported graph patch operation: " + opText);
         }
-        String node = required(op, "node");
-        if (node.startsWith("#")) {
-            node = node.substring(1);
+        String nodeId = required(op, "node");
+        if (nodeId.startsWith("#")) {
+            nodeId = nodeId.substring(1);
         }
         String field = required(op, "field");
         if (!"value".equals(field)) {
@@ -106,144 +114,194 @@ public final class JbxGraph {
         }
         String expected = required(op, "expect");
         String value = required(op, "value");
-        AtomicInteger literalIndex = new AtomicInteger();
-        AtomicBoolean changed = new AtomicBoolean();
-        String target = node;
-        SourceFile updated = (SourceFile) new JavaIsoVisitor<Integer>() {
-            @Override
-            public J.Literal visitLiteral(J.Literal literal, Integer integer) {
-                J.Literal visited = super.visitLiteral(literal, integer);
-                String id = "literal-" + literalIndex.incrementAndGet();
-                if (!id.equals(target)) {
-                    return visited;
-                }
-                Object literalValue = visited.getValue();
-                String old = literalValue == null ? "null" : literalValue.toString();
-                if (!expected.equals(old)) {
-                    throw new IllegalArgumentException("literal #" + id + " expected value \"" + expected + "\" but was \"" + old + "\"");
-                }
-                if (visited.getType() != JavaType.Primitive.String) {
-                    throw new IllegalArgumentException("literal #" + id + " is not a string literal; graph patch currently supports only string literal values");
-                }
-                changed.set(true);
-                return visited.withValue(value).withValueSource(quoteJava(value));
-            }
-        }.visit(sourceFile, 0);
-        if (!changed.get()) {
-            throw new IllegalArgumentException("graph node not found: #" + target);
+        String target = nodeId;
+        GraphNode graphNode = nodes.stream()
+                .filter(n -> n.id().equals(target))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("graph node not found: #" + target));
+        if (!"literal".equals(graphNode.kind())) {
+            throw new IllegalArgumentException("graph node #" + target + " is not a literal");
         }
-        return updated;
+        if (!expected.equals(graphNode.value())) {
+            throw new IllegalArgumentException("literal #" + target + " expected value \"" + expected + "\" but was \"" + graphNode.value() + "\"");
+        }
+        AtomicBoolean changed = new AtomicBoolean();
+        cu.walk(StringLiteralExpr.class, literal -> {
+            if (changed.get()) {
+                return;
+            }
+            if (literal == graphNode.ast()) {
+                literal.setString(value);
+                changed.set(true);
+            }
+        });
+        if (!changed.get()) {
+            throw new IllegalArgumentException("literal #" + target + " is not a string literal; graph patch currently supports only string literal values");
+        }
     }
 
     private static String dump(Path source, boolean json) throws IOException {
         ParsedSource parsed = parse(source);
-        List<Node> nodes = collectNodes(parsed.sourceFile(), parsed.compact());
+        List<GraphNode> nodes = collectNodes(parsed);
         String body = graphBody(source, nodes);
         String hash = graphHash(body);
         if (json) {
             return jsonGraph(source, hash, nodes);
         }
-        return "jbx-graph v1\n" + "graph-hash " + hash + "\n" + body;
+        return textGraph(source, hash, nodes);
     }
 
-    private static List<Node> collectNodes(SourceFile parsed, boolean compact) {
-        List<Node> nodes = new ArrayList<>();
-        AtomicInteger classIndex = new AtomicInteger();
-        AtomicInteger methodIndex = new AtomicInteger();
-        AtomicInteger callIndex = new AtomicInteger();
-        AtomicInteger variableIndex = new AtomicInteger();
-        AtomicInteger literalIndex = new AtomicInteger();
-        new JavaVisitor<Integer>() {
-            @Override
-            public J visitClassDeclaration(J.ClassDeclaration classDecl, Integer integer) {
-                if (!(compact && COMPACT_WRAPPER_CLASS.equals(classDecl.getSimpleName()))) {
-                    nodes.add(new Node("class-" + classIndex.incrementAndGet(), "class", "name", classDecl.getSimpleName()));
-                }
-                return super.visitClassDeclaration(classDecl, integer);
-            }
+    private static String textGraph(Path source, String hash, List<GraphNode> nodes) {
+        return "jbx-graph v1\n" + "graph-hash " + hash + "\n" + graphBody(source, nodes);
+    }
 
-            @Override
-            public J visitMethodDeclaration(J.MethodDeclaration method, Integer integer) {
-                nodes.add(new Node("method-" + methodIndex.incrementAndGet(), "method", "name", method.getSimpleName()));
-                return super.visitMethodDeclaration(method, integer);
+    private static List<GraphNode> collectNodes(ParsedSource parsed) {
+        IdentityHashMap<Node, String> ids = new IdentityHashMap<>();
+        LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
+        List<GraphNode> nodes = new ArrayList<>();
+        parsed.compilationUnit().walk(Node.TreeTraversal.PREORDER, ast -> {
+            String kind = kind(ast);
+            if (kind == null) {
+                return;
             }
-
-            @Override
-            public J visitMethodInvocation(J.MethodInvocation method, Integer integer) {
-                nodes.add(new Node("call-" + callIndex.incrementAndGet(), "call", "name", method.getSimpleName()));
-                return super.visitMethodInvocation(method, integer);
-            }
-
-            @Override
-            public J visitVariableDeclarations(J.VariableDeclarations multiVariable, Integer integer) {
-                for (J.VariableDeclarations.NamedVariable variable : multiVariable.getVariables()) {
-                    nodes.add(new Node("variable-" + variableIndex.incrementAndGet(), "variable", "name", variable.getSimpleName()));
-                }
-                return super.visitVariableDeclarations(multiVariable, integer);
-            }
-
-            @Override
-            public J visitLiteral(J.Literal literal, Integer integer) {
-                Object value = literal.getValue();
-                nodes.add(new Node("literal-" + literalIndex.incrementAndGet(), "literal", "value", value == null ? "null" : value.toString()));
-                return super.visitLiteral(literal, integer);
-            }
-        }.visit(parsed, 0);
+            int next = counts.merge(kind, 1, Integer::sum);
+            String id = kind + "-" + next;
+            ids.put(ast, id);
+            String name = name(ast);
+            String value = value(ast);
+            String parentId = ast.getParentNode().map(ids::get).orElse(null);
+            nodes.add(new GraphNode(id, kind, name, value, parentId, range(ast), snippet(parsed.text(), ast), ast));
+        });
         return nodes;
     }
 
-    private static String graphBody(Path source, List<Node> nodes) {
+    private static String kind(Node ast) {
+        if (ast instanceof ClassOrInterfaceDeclaration n) {
+            if ("$COMPACT_CLASS".equals(n.getNameAsString())) return null;
+            return "class";
+        }
+        if (ast instanceof RecordDeclaration) return "record";
+        if (ast instanceof EnumDeclaration) return "enum";
+        if (ast instanceof MethodDeclaration) return "method";
+        if (ast instanceof MethodCallExpr) return "call";
+        if (ast instanceof VariableDeclarator) return "variable";
+        if (ast instanceof LiteralStringValueExpr) return "literal";
+        return null;
+    }
+
+    private static String name(Node ast) {
+        if (ast instanceof ClassOrInterfaceDeclaration n) return n.getNameAsString();
+        if (ast instanceof RecordDeclaration n) return n.getNameAsString();
+        if (ast instanceof EnumDeclaration n) return n.getNameAsString();
+        if (ast instanceof MethodDeclaration n) return n.getNameAsString();
+        if (ast instanceof MethodCallExpr n) return n.getNameAsString();
+        if (ast instanceof VariableDeclarator n) return n.getNameAsString();
+        return null;
+    }
+
+    private static String value(Node ast) {
+        if (ast instanceof StringLiteralExpr n) return n.asString();
+        if (ast instanceof LiteralStringValueExpr n) return n.getValue();
+        return null;
+    }
+
+    private static SourceRange range(Node ast) {
+        Optional<Range> range = ast.getRange();
+        if (range.isEmpty()) {
+            return null;
+        }
+        Range r = range.get();
+        return new SourceRange(r.begin.line, r.begin.column, r.end.line, r.end.column);
+    }
+
+    private static String snippet(String source, Node ast) {
+        Optional<Range> range = ast.getRange();
+        if (range.isEmpty()) {
+            return null;
+        }
+        String[] lines = source.split("\\R", -1);
+        Range r = range.get();
+        if (r.begin.line < 1 || r.end.line > lines.length || r.begin.line > r.end.line) {
+            return null;
+        }
+        StringBuilder out = new StringBuilder();
+        for (int lineNo = r.begin.line; lineNo <= r.end.line; lineNo++) {
+            String line = lines[lineNo - 1];
+            int start = lineNo == r.begin.line ? Math.max(0, r.begin.column - 1) : 0;
+            int end = lineNo == r.end.line ? Math.min(line.length(), r.end.column) : line.length();
+            if (start > end || start > line.length()) {
+                return null;
+            }
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(line, start, end);
+        }
+        String text = out.toString();
+        return text.length() > 240 ? text.substring(0, 237) + "..." : text;
+    }
+
+    private static String graphBody(Path source, List<GraphNode> nodes) {
         StringBuilder body = new StringBuilder();
         body.append("path ").append(source).append('\n');
-        for (Node node : nodes) {
-            body.append("node #")
-                    .append(node.id())
-                    .append(" kind=")
-                    .append(node.kind())
-                    .append(' ')
-                    .append(node.field())
-                    .append("=\"")
-                    .append(esc(node.value()))
-                    .append("\"\n");
+        for (GraphNode node : nodes) {
+            body.append("node #").append(node.id()).append(" kind=").append(node.kind());
+            if (node.name() != null) {
+                body.append(" name=\"").append(esc(node.name())).append("\"");
+            }
+            if (node.value() != null) {
+                body.append(" value=\"").append(esc(node.value())).append("\"");
+            }
+            if (node.parentId() != null) {
+                body.append(" parent=\"#").append(node.parentId()).append("\"");
+            }
+            if (node.range() != null) {
+                body.append(" range=\"").append(node.range()).append("\"");
+            }
+            if (node.snippet() != null) {
+                body.append(" snippet=\"").append(esc(node.snippet())).append("\"");
+            }
+            body.append('\n');
         }
         return body.toString();
     }
 
-    private static String jsonGraph(Path source, String hash, List<Node> nodes) throws IOException {
+    private static String jsonGraph(Path source, String hash, List<GraphNode> nodes) throws IOException {
         ObjectNode root = JSON.createObjectNode();
         root.put("version", "jbx-graph v1");
+        root.put("parser", "javaparser");
         root.put("graphHash", hash);
         root.put("path", source.toString());
         ArrayNode nodeArray = root.putArray("nodes");
-        for (Node node : nodes) {
+        for (GraphNode node : nodes) {
             ObjectNode jsonNode = nodeArray.addObject();
             jsonNode.put("id", "#" + node.id());
             jsonNode.put("kind", node.kind());
-            jsonNode.put(node.field(), node.value());
+            if (node.name() != null) jsonNode.put("name", node.name());
+            if (node.value() != null) jsonNode.put("value", node.value());
+            if (node.parentId() != null) jsonNode.put("parent", "#" + node.parentId());
+            if (node.range() != null) {
+                ObjectNode range = jsonNode.putObject("range");
+                range.put("beginLine", node.range().beginLine());
+                range.put("beginColumn", node.range().beginColumn());
+                range.put("endLine", node.range().endLine());
+                range.put("endColumn", node.range().endColumn());
+            }
+            if (node.snippet() != null) jsonNode.put("snippet", node.snippet());
         }
         return JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root) + "\n";
     }
 
     private static ParsedSource parse(Path source) throws IOException {
         String text = Files.readString(source, StandardCharsets.UTF_8);
-        boolean compact = isCompactSource(text);
-        String parseText = compact ? wrapCompactSource(text) : text;
-        ExecutionContext ctx = new InMemoryExecutionContext(throwable -> {
-            throw new RuntimeException(throwable);
-        });
-        ctx.putMessage(ExecutionContext.REQUIRE_PRINT_EQUALS_INPUT, false);
-        SourceFile sourceFile = JavaParser.fromJavaVersion()
-                .build()
-                .parse(ctx, parseText)
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("OpenRewrite did not parse " + source));
-        if (sourceFile instanceof org.openrewrite.tree.ParseError parseError) {
-            throw parseError.toException();
+        ParserConfiguration config = new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE);
+        ParseResult<CompilationUnit> result = new JavaParser(config).parse(ParseStart.COMPILATION_UNIT, Providers.provider(text));
+        if (!result.isSuccessful() || result.getResult().isEmpty()) {
+            StringBuilder message = new StringBuilder("JavaParser failed to parse ").append(source);
+            result.getProblems().forEach(problem -> message.append('\n').append(problem));
+            throw new IllegalArgumentException(message.toString());
         }
-        if (!(sourceFile instanceof J.CompilationUnit)) {
-            throw new IllegalArgumentException("OpenRewrite parsed " + source + " as " + sourceFile.getClass().getName() + " instead of a Java compilation unit");
-        }
-        return new ParsedSource(sourceFile, compact);
+        return new ParsedSource(result.getResult().get(), text);
     }
 
     private static String graphHash(String graph) {
@@ -313,173 +371,14 @@ public final class JbxGraph {
         return out.toString();
     }
 
-    private static boolean isCompactSource(String source) {
-        int braceDepth = 0;
-        boolean inBlockComment = false;
-        for (String line : source.split("\\R")) {
-            String trimmed = line.stripLeading();
-            if (braceDepth == 0) {
-                if (inBlockComment || trimmed.startsWith("/*")) {
-                    inBlockComment = !trimmed.contains("*/");
-                    continue;
-                }
-                if (isIgnorableTopLevelPrefix(trimmed) || trimmed.startsWith("@")) {
-                    continue;
-                }
-                return !startsWithJavaTypeDeclaration(trimmed);
-            }
-            braceDepth = updateBraceDepth(braceDepth, line);
+    private record ParsedSource(CompilationUnit compilationUnit, String text) {}
+
+    private record SourceRange(int beginLine, int beginColumn, int endLine, int endColumn) {
+        @Override
+        public String toString() {
+            return beginLine + ":" + beginColumn + "-" + endLine + ":" + endColumn;
         }
-        return false;
     }
 
-    private static boolean isIgnorableTopLevelPrefix(String trimmed) {
-        return trimmed.isEmpty()
-                || trimmed.startsWith("//")
-                || trimmed.startsWith("#!")
-                || trimmed.startsWith("package ")
-                || trimmed.startsWith("import ");
-    }
-
-    private static int updateBraceDepth(int depth, String line) {
-        int next = depth;
-        boolean inString = false;
-        boolean inChar = false;
-        for (int i = 0; i < line.length(); i++) {
-            char ch = line.charAt(i);
-            if (ch == '\\' && (inString || inChar)) {
-                i++;
-                continue;
-            }
-            if (ch == '"' && !inChar) {
-                inString = !inString;
-                continue;
-            }
-            if (ch == '\'' && !inString) {
-                inChar = !inChar;
-                continue;
-            }
-            if (inString || inChar) {
-                continue;
-            }
-            if (ch == '/' && i + 1 < line.length() && line.charAt(i + 1) == '/') {
-                break;
-            }
-            if (ch == '{') {
-                next++;
-            } else if (ch == '}') {
-                next = Math.max(0, next - 1);
-            }
-        }
-        return next;
-    }
-
-    private static boolean startsWithJavaTypeDeclaration(String trimmed) {
-        String[] prefixes = {
-                "class ", "abstract class ", "sealed class ", "non-sealed class ", "final class ",
-                "public class ", "public abstract class ", "public sealed class ", "public non-sealed class ", "public final class ",
-                "record ", "public record ", "interface ", "public interface ", "enum ", "public enum ", "@interface ", "public @interface "
-        };
-        for (String prefix : prefixes) {
-            if (trimmed.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String wrapCompactSource(String source) {
-        String[] split = splitCompactPrefix(source);
-        StringBuilder wrapped = new StringBuilder();
-        wrapped.append(split[0]);
-        wrapped.append("class ").append(COMPACT_WRAPPER_CLASS).append(" {\n");
-        for (String line : split[1].split("\\R", -1)) {
-            if (!line.isEmpty()) {
-                wrapped.append("    ").append(line);
-            }
-            wrapped.append('\n');
-        }
-        wrapped.append("}\n");
-        return wrapped.toString();
-    }
-
-    private static String[] splitCompactPrefix(String source) {
-        StringBuilder prefix = new StringBuilder();
-        StringBuilder body = new StringBuilder();
-        boolean inPrefix = true;
-        boolean inBlockComment = false;
-        for (String line : source.split("\\R", -1)) {
-            String trimmed = line.stripLeading();
-            if (inPrefix) {
-                boolean prefixLine = inBlockComment
-                        || trimmed.isEmpty()
-                        || trimmed.startsWith("//")
-                        || trimmed.startsWith("#!")
-                        || trimmed.startsWith("package ")
-                        || trimmed.startsWith("import ")
-                        || trimmed.startsWith("/*");
-                if (prefixLine) {
-                    prefix.append(line).append('\n');
-                    if (inBlockComment || trimmed.startsWith("/*")) {
-                        inBlockComment = !trimmed.contains("*/");
-                    }
-                    continue;
-                }
-                inPrefix = false;
-            }
-            body.append(line).append('\n');
-        }
-        return new String[] {prefix.toString(), body.toString().stripTrailing()};
-    }
-
-    private static String unwrapCompactSource(String printed) {
-        String[] lines = printed.split("\\R", -1);
-        int wrapperStart = -1;
-        for (int i = 0; i < lines.length; i++) {
-            if (lines[i].trim().equals("class " + COMPACT_WRAPPER_CLASS + " {")) {
-                wrapperStart = i;
-                break;
-            }
-        }
-        if (wrapperStart < 0) {
-            return printed;
-        }
-        int wrapperEnd = -1;
-        for (int i = lines.length - 1; i > wrapperStart; i--) {
-            if (lines[i].trim().equals("}")) {
-                wrapperEnd = i;
-                break;
-            }
-        }
-        if (wrapperEnd < 0) {
-            return printed;
-        }
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < wrapperStart; i++) {
-            out.append(lines[i]).append('\n');
-        }
-        int indent = Integer.MAX_VALUE;
-        for (int i = wrapperStart + 1; i < wrapperEnd; i++) {
-            String line = lines[i];
-            if (!line.isBlank()) {
-                indent = Math.min(indent, line.length() - line.stripLeading().length());
-            }
-        }
-        if (indent == Integer.MAX_VALUE) {
-            indent = 0;
-        }
-        for (int i = wrapperStart + 1; i < wrapperEnd; i++) {
-            String line = lines[i];
-            out.append(line.length() >= indent ? line.substring(indent) : line).append('\n');
-        }
-        return out.toString();
-    }
-
-    private static String quoteJava(String value) {
-        return "\"" + esc(value).replace("\t", "\\t") + "\"";
-    }
-
-    private record ParsedSource(SourceFile sourceFile, boolean compact) {}
-
-    private record Node(String id, String kind, String field, String value) {}
+    private record GraphNode(String id, String kind, String name, String value, String parentId, SourceRange range, String snippet, Node ast) {}
 }
