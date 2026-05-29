@@ -19,6 +19,7 @@ import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.LiteralStringValueExpr;
+import com.github.javaparser.printer.lexicalpreservation.LexicalPreservingPrinter;
 import com.github.javaparser.serialization.JavaParserJsonSerializer;
 import jakarta.json.Json;
 import java.io.IOException;
@@ -111,12 +112,13 @@ public final class JbxGraph {
         }
 
         CompilationUnit cu = parsed.compilationUnit();
+        LexicalPreservingPrinter.setup(cu);
         List<GraphNode> nodes = collectNodes(parsed);
         for (String op : ops) {
             applySetLiteralValue(cu, nodes, op);
             nodes = collectNodes(new ParsedSource(cu, parsed.text()));
         }
-        Files.writeString(source, cu.toString(), StandardCharsets.UTF_8);
+        Files.writeString(source, LexicalPreservingPrinter.print(cu), StandardCharsets.UTF_8);
         System.out.println("patched " + source);
     }
 
@@ -152,7 +154,7 @@ public final class JbxGraph {
                 return;
             }
             if (literal == graphNode.ast()) {
-                literal.setString(value);
+                literal.replace(new StringLiteralExpr(value));
                 changed.set(true);
             }
         });

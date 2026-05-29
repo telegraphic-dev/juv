@@ -451,6 +451,49 @@ fn graph_patch_updates_compact_source_without_leaking_wrapper() {
 }
 
 #[test]
+fn graph_patch_preserves_surrounding_formatting_with_lexical_printer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Weird.java");
+    fs::write(
+        &source,
+        "// leading comment\nclass Weird   { // class comment\n  void main( ) { // method comment\n    String message=\"hello\";   // keep spacing\n    IO.println(  message  );\n  }\n}\n",
+    )
+    .unwrap();
+
+    let dump = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&dump);
+    let stdout = String::from_utf8_lossy(&dump.stdout);
+    let hash = graph_hash(&stdout);
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("patch")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--expect-graph-hash")
+        .arg(hash)
+        .arg("--op")
+        .arg("set node=\"#literal-1\" field=\"value\" expect=\"hello\" value=\"goodbye\"")
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let updated = fs::read_to_string(&source).unwrap();
+    assert_eq!(
+        updated,
+        "// leading comment\nclass Weird   { // class comment\n  void main( ) { // method comment\n    String message=\"goodbye\";   // keep spacing\n    IO.println(  message  );\n  }\n}\n"
+    );
+}
+
+#[test]
 fn graph_patch_rejects_non_string_literals() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");
