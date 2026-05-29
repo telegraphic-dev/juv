@@ -28,17 +28,59 @@ function parseFrontmatter(markdown) {
   const raw = markdown.slice(4, end).trim().split('\n');
   const data = {};
   for (const line of raw) {
-    const idx = line.indexOf(':');
-    if (idx > -1) data[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^['"]|['"]$/g, '');
+    const idx = line.indexOf(': ');
+    if (idx > -1) data[line.slice(0, idx).trim()] = line.slice(idx + 2).trim().replace(/^['"]|['"]$/g, '');
   }
   return [data, markdown.slice(end + 5).trimStart()];
 }
 
+function matchingParen(value, start) {
+  let depth = 0;
+  for (let i = start; i < value.length; i += 1) {
+    if (value[i] === '(') depth += 1;
+    if (value[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 function inline(md) {
-  return escapeHtml(md)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  let out = '';
+  for (let i = 0; i < md.length;) {
+    if (md[i] === '`') {
+      const end = md.indexOf('`', i + 1);
+      if (end !== -1) {
+        out += `<code>${escapeHtml(md.slice(i + 1, end))}</code>`;
+        i = end + 1;
+        continue;
+      }
+    }
+    if (md.startsWith('**', i)) {
+      const end = md.indexOf('**', i + 2);
+      if (end !== -1) {
+        out += `<strong>${escapeHtml(md.slice(i + 2, end))}</strong>`;
+        i = end + 2;
+        continue;
+      }
+    }
+    if (md[i] === '[') {
+      const textEnd = md.indexOf('](', i + 1);
+      if (textEnd !== -1) {
+        const hrefStart = textEnd + 2;
+        const hrefEnd = matchingParen(md, hrefStart - 1);
+        if (hrefEnd !== -1) {
+          out += `<a href="${escapeHtml(md.slice(hrefStart, hrefEnd))}">${escapeHtml(md.slice(i + 1, textEnd))}</a>`;
+          i = hrefEnd + 1;
+          continue;
+        }
+      }
+    }
+    out += escapeHtml(md[i]);
+    i += 1;
+  }
+  return out;
 }
 
 function markdownToHtml(markdown) {
