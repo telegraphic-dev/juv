@@ -14,4 +14,4 @@ The build emits HTML pages, Markdown route siblings, `llms.txt`, `llms-full.txt`
 
 ## Publishing
 
-`Dockerfile` builds the static site and serves it with nginx. The repository workflow publishes `ghcr.io/telegraphic-dev/jbx-website:latest` from `main`.
+GitHub Actions builds `dist/` and deploys it to GitHub Pages from `main`. The custom domain is set by `public/CNAME`.
