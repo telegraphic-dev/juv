@@ -100,6 +100,37 @@ fn serve_files(files: std::collections::HashMap<&'static str, Vec<u8>>) -> Strin
 }
 
 #[test]
+fn check_runs_compiler_wrapper_from_published_maven_artifact() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let source = tmp.path().join("Example.java");
+    fs::write(&source, "class Example {}\n").unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--no-error-prone")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let wrapper_jar_found = walkdir::WalkDir::new(&cache)
+        .into_iter()
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name() == "jbx-check-0.1.0.jar");
+    assert!(
+        wrapper_jar_found,
+        "expected check to resolve dev.telegraphic.jbx:jbx-check:0.1.0 into {}",
+        cache.display()
+    );
+}
+
+#[test]
 fn check_uses_jbang_dependency_directives_for_classpath() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache");

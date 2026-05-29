@@ -545,7 +545,9 @@ fn is_version_range(version: &str) -> bool {
 }
 
 fn resolve_version_spec(module: &Module, version: &str, repos: &[Repository]) -> Result<String> {
-    if is_version_range(version) {
+    if version.is_empty() {
+        resolve_latest_version(module, repos)
+    } else if is_version_range(version) {
         let metadata = fetch_maven_metadata(module, repos)?;
         select_version_from_range(version, &metadata.versions)
             .ok_or_else(|| anyhow!("no version of {module} matches range {version}"))
@@ -829,16 +831,20 @@ pub fn resolve_classpath(
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Parse a Maven coordinate string like `org.slf4j:slf4j-api:2.0.13`.
+/// `groupId:artifactId` is accepted with an empty version; resolver entrypoints
+/// expand it to the latest release from Maven metadata once repositories are
+/// known.
 pub fn parse_coordinate(coord: &str) -> Result<Dependency> {
     let parts: Vec<&str> = coord.split(':').collect();
-    if parts.len() < 3 {
+    if parts.len() < 2 {
         return Err(anyhow!(
-            "invalid Maven coordinate '{coord}' (expected groupId:artifactId[:classifier]:version)"
+            "invalid Maven coordinate '{coord}' (expected groupId:artifactId[:classifier][:version])"
         ));
     }
 
     // With 4+ segments: group:artifact[:classifier]:version
-    // Last segment is always version. If 4 parts, part[2] is classifier.
+    // With 3 segments: group:artifact:version
+    // With 2 segments: group:artifact, version resolved later from metadata.
     let (org, name, classifier, version) = if parts.len() >= 4 {
         (
             parts[0].to_string(),
@@ -846,14 +852,27 @@ pub fn parse_coordinate(coord: &str) -> Result<Dependency> {
             Some(parts[2].to_string()),
             parts[3].to_string(),
         )
-    } else {
+    } else if parts.len() == 3 {
         (
             parts[0].to_string(),
             parts[1].to_string(),
             None,
             parts[2].to_string(),
         )
+    } else {
+        (
+            parts[0].to_string(),
+            parts[1].to_string(),
+            None,
+            String::new(),
+        )
     };
+
+    if org.is_empty() || name.is_empty() {
+        return Err(anyhow!(
+            "invalid Maven coordinate '{coord}' (groupId and artifactId must be non-empty)"
+        ));
+    }
 
     Ok(Dependency {
         module: Module { org, name },
@@ -1398,8 +1417,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_coordinate_without_version_for_latest_resolution() {
+        let dep = parse_coordinate("com.google:guava").unwrap();
+        assert_eq!(dep.module.org, "com.google");
+        assert_eq!(dep.module.name, "guava");
+        assert_eq!(dep.version, "");
+        assert_eq!(dep.classifier, None);
+    }
+
+    #[test]
     fn rejects_invalid_coordinate() {
-        assert!(parse_coordinate("com.google:guava").is_err());
+        assert!(parse_coordinate("com.google:").is_err());
+        assert!(parse_coordinate(":guava").is_err());
         assert!(parse_coordinate("").is_err());
     }
 

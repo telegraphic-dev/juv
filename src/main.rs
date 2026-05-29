@@ -2,8 +2,10 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::{
+    collections::BTreeSet,
     fs,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::Command as ProcessCommand,
     time::{SystemTime, UNIX_EPOCH},
@@ -56,6 +58,8 @@ enum Commands {
     Build(BuildCommand),
     /// Prepare Maven Central publishing artifacts.
     Publish(PublishCommand),
+    /// Install the current project into a Maven repository layout.
+    Install(InstallCommand),
     /// Print agent-friendly documentation for source, directories, or Maven artifacts.
     Docs(DocsCommand),
     /// Check Java source files with javac diagnostics and Error Prone by default.
@@ -283,6 +287,10 @@ struct PublishCommand {
     #[arg(long = "publish")]
     publish: bool,
 
+    /// Serve a local Maven repository containing the artifact on the given port.
+    #[arg(long = "serve", conflicts_with_all = ["dry_run", "publish"])]
+    serve: Option<u16>,
+
     /// Maven Central Portal publishing type for the upload.
     #[arg(long = "publishing-type", default_value = "automatic")]
     publishing_type: CentralPublishingType,
@@ -302,6 +310,36 @@ struct PublishCommand {
     /// Maximum seconds to wait for Maven Central publication before exiting.
     #[arg(long = "max-wait-seconds", default_value_t = 600)]
     max_wait_seconds: u64,
+}
+
+#[derive(Parser, Debug)]
+struct InstallCommand {
+    /// Java source file to install. Defaults to jbx.json main when --file is used.
+    script: Option<PathBuf>,
+
+    /// jbx descriptor file. Defaults to ./jbx.json when present.
+    #[arg(long = "file")]
+    file: Option<PathBuf>,
+
+    /// Override version from jbx.json or //GAV.
+    #[arg(long = "version")]
+    version: Option<String>,
+
+    /// Destination Maven repository root. Defaults to ~/.m2/repository.
+    #[arg(long = "destination", alias = "to")]
+    destination: Option<PathBuf>,
+
+    /// Working directory for staged install artifacts.
+    #[arg(long = "target-dir")]
+    target_dir: Option<PathBuf>,
+
+    /// Override package used when staging default-package sources.
+    #[arg(long = "package")]
+    package_name: Option<String>,
+
+    /// Override cache directory.
+    #[arg(long = "cache-dir")]
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -3859,19 +3897,26 @@ struct PublishDescriptor {
     repos: Vec<String>,
 }
 
-fn run_publish(cmd: PublishCommand) -> Result<i32> {
+fn run_publish(mut cmd: PublishCommand) -> Result<i32> {
     if cmd.publish && cmd.dry_run {
         anyhow::bail!("--dry-run and --publish are mutually exclusive; dry-run never uploads");
     }
-    if !cmd.publish && !cmd.dry_run {
+    if !cmd.publish && !cmd.dry_run && cmd.serve.is_none() {
         anyhow::bail!(
-            "publish requires --dry-run for local inspection or --publish for Maven Central upload"
+            "publish requires --dry-run for local inspection, --publish for Maven Central upload, or --serve <port> for a local Maven repository server"
         );
     }
     if cmd.publish && cmd.skip_signing {
         anyhow::bail!("--publish requires signed artifacts; remove --skip-signing or use --dry-run for local inspection");
     }
     let descriptor = load_publish_descriptor(&cmd)?;
+    if let Some(port) = cmd.serve {
+        cmd.skip_signing = true;
+        let repository = prepare_publish_repository(&descriptor, &cmd)?;
+        write_maven_metadata(&repository, &descriptor, "maven-metadata.xml", true)?;
+        serve_maven_repository(&repository, port)?;
+        return Ok(0);
+    }
     let bundle = prepare_publish_bundle(&descriptor, &cmd)?;
     if !cmd.publish {
         println!(
@@ -3906,6 +3951,276 @@ fn run_publish(cmd: PublishCommand) -> Result<i32> {
         cmd.max_wait_seconds,
     )?;
     Ok(0)
+}
+
+fn run_install(cmd: InstallCommand) -> Result<i32> {
+    let destination_arg = cmd.destination.clone();
+    let publish_cmd = PublishCommand {
+        script: cmd.script,
+        file: cmd.file,
+        version: cmd.version,
+        output: None,
+        target_dir: cmd.target_dir,
+        package_name: cmd.package_name,
+        cache_dir: cmd.cache_dir,
+        dry_run: false,
+        skip_signing: true,
+        gpg_key: None,
+        publish: false,
+        serve: None,
+        publishing_type: CentralPublishingType::Automatic,
+        central_url: None,
+        no_wait: false,
+        poll_interval: 5,
+        max_wait_seconds: 600,
+    };
+    let descriptor = load_publish_descriptor(&publish_cmd)?;
+    let repository = prepare_publish_repository(&descriptor, &publish_cmd)?;
+    let destination = cmd_destination_or_maven_local(destination_arg)?;
+    copy_dir_contents(&repository, &destination)?;
+    write_maven_metadata(&destination, &descriptor, "maven-metadata-local.xml", false)?;
+    let installed = destination
+        .join(descriptor.coordinates.group.replace('.', "/"))
+        .join(&descriptor.coordinates.id)
+        .join(&descriptor.coordinates.version);
+    println!(
+        "installed {}:{}:{} to {}",
+        descriptor.coordinates.group,
+        descriptor.coordinates.id,
+        descriptor.coordinates.version,
+        installed.display()
+    );
+    Ok(0)
+}
+
+fn cmd_destination_or_maven_local(destination: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(destination) = destination {
+        return Ok(destination);
+    }
+    dirs::home_dir()
+        .map(|home| home.join(".m2").join("repository"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "could not determine home directory for Maven local repository; pass --destination"
+            )
+        })
+}
+
+fn copy_dir_contents(source: &Path, destination: &Path) -> Result<()> {
+    for entry in walkdir::WalkDir::new(source) {
+        let entry = entry?;
+        let relative = entry.path().strip_prefix(source)?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        let target = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), &target).with_context(|| {
+                format!(
+                    "failed to copy {} to {}",
+                    entry.path().display(),
+                    target.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn write_maven_metadata(
+    repository: &Path,
+    descriptor: &PublishDescriptor,
+    file_name: &str,
+    checksums: bool,
+) -> Result<()> {
+    let artifact_dir = repository
+        .join(descriptor.coordinates.group.replace('.', "/"))
+        .join(&descriptor.coordinates.id);
+    fs::create_dir_all(&artifact_dir)?;
+    let metadata_path = artifact_dir.join(file_name);
+    let mut versions = metadata_path
+        .exists()
+        .then(|| fs::read_to_string(&metadata_path))
+        .transpose()?
+        .map(|text| maven_metadata_versions(&text))
+        .unwrap_or_default();
+    versions.insert(descriptor.coordinates.version.clone());
+    let metadata = render_maven_metadata(descriptor, &versions)?;
+    fs::write(&metadata_path, metadata)?;
+    if checksums {
+        write_checksums(&metadata_path)?;
+    }
+    Ok(())
+}
+
+fn maven_metadata_versions(text: &str) -> BTreeSet<String> {
+    let mut versions = BTreeSet::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<version>") {
+        rest = &rest[start + "<version>".len()..];
+        let Some(end) = rest.find("</version>") else {
+            break;
+        };
+        let version = rest[..end].trim();
+        if !version.is_empty() {
+            versions.insert(version.to_string());
+        }
+        rest = &rest[end + "</version>".len()..];
+    }
+    versions
+}
+
+fn render_maven_metadata(
+    descriptor: &PublishDescriptor,
+    versions: &BTreeSet<String>,
+) -> Result<String> {
+    let version = &descriptor.coordinates.version;
+    let last_updated = maven_last_updated_timestamp()?;
+    let mut rendered_versions = String::new();
+    for version in versions {
+        rendered_versions.push_str(&format!(
+            "\n      <version>{}</version>",
+            xml_escape(version)
+        ));
+    }
+    Ok(format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>{}</groupId>
+  <artifactId>{}</artifactId>
+  <versioning>
+    <latest>{}</latest>
+    <release>{}</release>
+    <versions>{}
+    </versions>
+    <lastUpdated>{}</lastUpdated>
+  </versioning>
+</metadata>
+"#,
+        xml_escape(&descriptor.coordinates.group),
+        xml_escape(&descriptor.coordinates.id),
+        xml_escape(version),
+        xml_escape(version),
+        rendered_versions,
+        last_updated
+    ))
+}
+
+fn maven_last_updated_timestamp() -> Result<String> {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_secs() as i64;
+    let days = seconds.div_euclid(86_400);
+    let seconds_of_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    Ok(format!(
+        "{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}"
+    ))
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year, m as u32, d as u32)
+}
+
+fn serve_maven_repository(repository: &Path, port: u16) -> Result<()> {
+    let listener = TcpListener::bind(("127.0.0.1", port))
+        .with_context(|| format!("failed to bind Maven repository server on port {port}"))?;
+    let address = listener.local_addr()?;
+    println!(
+        "serving Maven repository at http://{}/ from {}",
+        address,
+        repository.display()
+    );
+    std::io::stdout().flush()?;
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                if let Err(err) = handle_maven_repository_request(stream, repository) {
+                    eprintln!("Maven repository request failed: {err}");
+                }
+            }
+            Err(err) => eprintln!("Maven repository connection failed: {err}"),
+        }
+    }
+    Ok(())
+}
+
+fn handle_maven_repository_request(mut stream: TcpStream, repository: &Path) -> Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut request = String::new();
+    reader.read_line(&mut request)?;
+    let mut parts = request.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or("/");
+    if method != "GET" && method != "HEAD" {
+        write_http_response(&mut stream, 405, "Method Not Allowed", b"")?;
+        return Ok(());
+    }
+    let Some(path) = maven_repository_request_path(repository, target) else {
+        write_http_response(&mut stream, 404, "Not Found", b"")?;
+        return Ok(());
+    };
+    if !path.is_file() {
+        write_http_response(&mut stream, 404, "Not Found", b"")?;
+        return Ok(());
+    }
+    let body = if method == "HEAD" {
+        Vec::new()
+    } else {
+        fs::read(&path)?
+    };
+    write_http_response(&mut stream, 200, "OK", &body)?;
+    Ok(())
+}
+
+fn maven_repository_request_path(repository: &Path, target: &str) -> Option<PathBuf> {
+    let path = target.split('?').next().unwrap_or(target);
+    let path = path.trim_start_matches('/');
+    if path.is_empty() {
+        return None;
+    }
+    let mut relative = PathBuf::new();
+    for segment in path.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." || segment.contains('\\') {
+            return None;
+        }
+        relative.push(segment);
+    }
+    Some(repository.join(relative))
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: u16,
+    reason: &str,
+    body: &[u8],
+) -> Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(body)?;
+    Ok(())
 }
 
 struct CentralClient {
@@ -4270,15 +4585,17 @@ fn load_publish_descriptor(cmd: &PublishCommand) -> Result<PublishDescriptor> {
     if description.is_none() {
         description = Some(format!("{} published with jbx", coordinates.id));
     }
-    require_publish_metadata("url", url.as_deref())?;
-    if licenses.is_empty() {
-        anyhow::bail!("publish requires at least one license for Maven Central metadata");
-    }
-    if developers.is_empty() {
-        anyhow::bail!("publish requires at least one developer for Maven Central metadata");
-    }
-    if scm.is_none() {
-        anyhow::bail!("publish requires scm metadata for Maven Central");
+    if cmd.publish || cmd.dry_run {
+        require_publish_metadata("url", url.as_deref())?;
+        if licenses.is_empty() {
+            anyhow::bail!("publish requires at least one license for Maven Central metadata");
+        }
+        if developers.is_empty() {
+            anyhow::bail!("publish requires at least one developer for Maven Central metadata");
+        }
+        if scm.is_none() {
+            anyhow::bail!("publish requires scm metadata for Maven Central");
+        }
     }
     Ok(PublishDescriptor {
         script,
@@ -4306,7 +4623,13 @@ fn resolve_publish_main_path(base_dir: &Path, main: &str) -> PathBuf {
     } else {
         base_dir.join(raw)
     };
-    if exact.exists() || raw.extension().is_some() {
+    if exact.exists() {
+        return exact;
+    }
+    if let Some(candidate) = resolve_publish_main_fqn(base_dir, main) {
+        return candidate;
+    }
+    if raw.extension().is_some() {
         return exact;
     }
     for extension in ["java", "jsh", "jav"] {
@@ -4318,12 +4641,51 @@ fn resolve_publish_main_path(base_dir: &Path, main: &str) -> PathBuf {
     exact
 }
 
+fn resolve_publish_main_fqn(base_dir: &Path, main: &str) -> Option<PathBuf> {
+    if !is_java_fqn(main) {
+        return None;
+    }
+    let (package_name, class_name) = main.rsplit_once('.')?;
+    let package_declaration = format!("package {package_name};");
+    let class_declaration = format!("class {class_name}");
+    let public_class_declaration = format!("public class {class_name}");
+    for entry in walkdir::WalkDir::new(base_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("java") {
+            continue;
+        }
+        if path.file_stem().and_then(|stem| stem.to_str()) != Some(class_name) {
+            continue;
+        }
+        let Ok(source) = fs::read_to_string(path) else {
+            continue;
+        };
+        if source.contains(&package_declaration)
+            && (source.contains(&public_class_declaration) || source.contains(&class_declaration))
+        {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
+}
+
+fn is_java_fqn(value: &str) -> bool {
+    value.split('.').filter(|part| !part.is_empty()).count() >= 2
+        && value.split('.').all(is_java_identifier)
+}
+
 fn publish_main_hint(path: &Path) -> String {
     if path.extension().is_some() {
         String::new()
     } else {
         format!(
-            " (also checked {}.java, {}.jsh, and {}.jav)",
+            " (also checked {}.java, {}.jsh, {}.jav, and Java FQN matches under the descriptor directory)",
             path.display(),
             path.display(),
             path.display()
@@ -4591,6 +4953,30 @@ fn is_java_identifier(value: &str) -> bool {
 }
 
 fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) -> Result<PathBuf> {
+    let repo_dir = prepare_publish_repository(descriptor, cmd)?;
+    let target_dir = cmd
+        .target_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("target/jbx-publish"));
+    let prefix = format!(
+        "{}-{}",
+        descriptor.coordinates.id, descriptor.coordinates.version
+    );
+    let bundle = cmd
+        .output
+        .clone()
+        .unwrap_or_else(|| target_dir.join(format!("{prefix}-central-bundle.zip")));
+    if let Some(parent) = bundle.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    zip_directory(&repo_dir, &bundle)?;
+    Ok(bundle)
+}
+
+fn prepare_publish_repository(
+    descriptor: &PublishDescriptor,
+    cmd: &PublishCommand,
+) -> Result<PathBuf> {
     let target_dir = cmd
         .target_dir
         .clone()
@@ -4664,15 +5050,7 @@ fn prepare_publish_bundle(descriptor: &PublishDescriptor, cmd: &PublishCommand) 
             write_gpg_signature(file, cmd.gpg_key.as_deref())?;
         }
     }
-    let bundle = cmd
-        .output
-        .clone()
-        .unwrap_or_else(|| target_dir.join(format!("{prefix}-central-bundle.zip")));
-    if let Some(parent) = bundle.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(parent)?;
-    }
-    zip_directory(&repo_dir, &bundle)?;
-    Ok(bundle)
+    Ok(repo_dir)
 }
 
 struct StagedPublishSources {
@@ -4837,20 +5215,21 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
     let description = descriptor
         .description
         .as_deref()
-        .expect("publish metadata was validated");
+        .map(|description| format!("\n  <description>{}</description>", xml_escape(description)))
+        .unwrap_or_default();
     let url = descriptor
         .url
         .as_deref()
-        .expect("publish metadata was validated");
+        .map(|url| format!("\n  <url>{}</url>", xml_escape(url)))
+        .unwrap_or_default();
     let dependencies = render_pom_dependencies(&descriptor.deps)?;
     let licenses = render_pom_licenses(&descriptor.licenses);
     let developers = render_pom_developers(&descriptor.developers);
-    let scm = render_pom_scm(
-        descriptor
-            .scm
-            .as_ref()
-            .expect("publish metadata was validated"),
-    );
+    let scm = descriptor
+        .scm
+        .as_ref()
+        .map(render_pom_scm)
+        .unwrap_or_default();
     Ok(format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -4859,17 +5238,15 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
   <artifactId>{}</artifactId>
   <version>{}</version>
   <packaging>jar</packaging>
-  <name>{}</name>
-  <description>{}</description>
-  <url>{}</url>{}{}{}{}
+  <name>{}</name>{}{}{}{}{}{}
 </project>
 "#,
         xml_escape(&descriptor.coordinates.group),
         xml_escape(&descriptor.coordinates.id),
         xml_escape(&descriptor.coordinates.version),
         xml_escape(name),
-        xml_escape(description),
-        xml_escape(url),
+        description,
+        url,
         licenses,
         developers,
         scm,
@@ -4878,6 +5255,9 @@ fn render_pom(descriptor: &PublishDescriptor) -> Result<String> {
 }
 
 fn render_pom_licenses(licenses: &[PublishLicense]) -> String {
+    if licenses.is_empty() {
+        return String::new();
+    }
     let mut out = String::from("\n  <licenses>");
     for license in licenses {
         out.push_str("\n    <license>");
@@ -4893,6 +5273,9 @@ fn render_pom_licenses(licenses: &[PublishLicense]) -> String {
 }
 
 fn render_pom_developers(developers: &[PublishDeveloper]) -> String {
+    if developers.is_empty() {
+        return String::new();
+    }
     let mut out = String::from("\n  <developers>");
     for developer in developers {
         out.push_str("\n    <developer>");
@@ -5205,28 +5588,8 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     }
 
     let jdk_root = jbx::jdk::resolve_jdk(&directives.java_version, true)?;
-    let javac = jbx::jdk::javac_bin_path(&jdk_root);
     let java = jbx::jdk::java_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
-    let wrapper_dir = root.join("compiler-wrapper");
-    fs::create_dir_all(&wrapper_dir)?;
-    let wrapper_source = wrapper_dir.join("JuvCheckCompiler.java");
-    let wrapper_class = wrapper_dir.join("JuvCheckCompiler.class");
-    fs::write(&wrapper_source, CHECK_COMPILER_SOURCE)?;
-    let wrapper_needs_compile = !wrapper_class.exists()
-        || fs::metadata(&wrapper_source)?.modified()? > fs::metadata(&wrapper_class)?.modified()?;
-    if wrapper_needs_compile {
-        let status = ProcessCommand::new(&javac)
-            .arg(&wrapper_source)
-            .status()
-            .with_context(|| format!("failed to execute {}", javac.display()))?;
-        if !status.success() {
-            return Err(anyhow::anyhow!(
-                "failed to compile jbx check compiler wrapper with exit code {}",
-                status.code().unwrap_or(1)
-            ));
-        }
-    }
 
     let mut compiler_options = vec!["-Xlint:all".to_string(), "-proc:none".to_string()];
     let classes_dir = root.join("classes");
@@ -5277,10 +5640,17 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         compiler_options.push("-Werror".to_string());
     }
 
-    let mut wrapper_classpath = vec![wrapper_dir.clone()];
+    let repos = maven_tool::maven_repositories(&directives.repos);
+    let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
+    let mut wrapper_classpath = jbx::resolver::resolve_classpath(
+        &[JBX_CHECK_COMPILER_COORDINATE.to_string()],
+        &repos,
+        &cache_dir,
+    )?;
+    if wrapper_classpath.is_empty() {
+        anyhow::bail!("no JARs resolved for {JBX_CHECK_COMPILER_COORDINATE}");
+    }
     if !cmd.no_error_prone {
-        let repos = maven_tool::maven_repositories(&split_cli_words(&cmd.repos));
-        let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
         let error_prone_coordinate = format!(
             "{ERROR_PRONE_GROUP_ID}:{ERROR_PRONE_ARTIFACT_ID}:{}",
             cmd.error_prone_version
@@ -5327,7 +5697,7 @@ fn check_java_command<'a>(
         std::env::join_paths(wrapper_classpath)
             .context("failed to build jbx check compiler wrapper classpath")?,
     );
-    command.arg("JuvCheckCompiler");
+    command.arg(JBX_CHECK_COMPILER_MAIN_CLASS);
     command.args(compiler_options);
     command.arg("--");
     command.args(files);
@@ -5391,95 +5761,8 @@ fn print_check_human(payload: &serde_json::Value) -> Result<()> {
 const ERROR_PRONE_GROUP_ID: &str = "com.google.errorprone";
 const ERROR_PRONE_ARTIFACT_ID: &str = "error_prone_core";
 const DEFAULT_ERROR_PRONE_VERSION: &str = "2.39.0";
-
-const CHECK_COMPILER_SOURCE: &str = r#"
-import javax.tools.*;
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-
-public class JuvCheckCompiler {
-  public static void main(String[] args) throws Exception {
-    List<String> options = new ArrayList<>();
-    List<String> files = new ArrayList<>();
-    boolean afterSeparator = false;
-    for (String arg : args) {
-      if (arg.equals("--")) {
-        afterSeparator = true;
-      } else if (afterSeparator) {
-        files.add(arg);
-      } else {
-        options.add(arg);
-      }
-    }
-
-    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-    if (compiler == null) {
-      System.err.println("No system Java compiler available. Run with a JDK, not a JRE.");
-      System.exit(2);
-    }
-
-    DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
-    StandardJavaFileManager fm = compiler.getStandardFileManager(diagnostics, Locale.ROOT, StandardCharsets.UTF_8);
-    Iterable<? extends JavaFileObject> units = fm.getJavaFileObjectsFromStrings(files);
-    StringWriter compilerOut = new StringWriter();
-    Boolean ok = compiler.getTask(compilerOut, fm, diagnostics, options, null, units).call();
-
-    StringBuilder sb = new StringBuilder();
-    sb.append("{\n  \"ok\": ").append(Boolean.TRUE.equals(ok)).append(",\n  \"diagnostics\": [\n");
-    List<Diagnostic<? extends JavaFileObject>> ds = diagnostics.getDiagnostics();
-    for (int i = 0; i < ds.size(); i++) {
-      Diagnostic<? extends JavaFileObject> d = ds.get(i);
-      sb.append("    {");
-      field(sb, "kind", d.getKind().toString()); sb.append(",");
-      field(sb, "code", d.getCode()); sb.append(",");
-      field(sb, "file", d.getSource() == null ? null : new File(d.getSource().toUri()).getPath()); sb.append(",");
-      sb.append("\"line\": ").append(d.getLineNumber()).append(",");
-      sb.append("\"column\": ").append(d.getColumnNumber()).append(",");
-      field(sb, "message", d.getMessage(Locale.ROOT));
-      sb.append("}");
-      if (i + 1 < ds.size()) sb.append(",");
-      sb.append("\n");
-    }
-    sb.append("  ],\n");
-    field(sb, "compilerOutput", compilerOut.toString());
-    sb.append("\n}\n");
-    System.out.print(sb);
-    fm.close();
-    System.exit(Boolean.TRUE.equals(ok) ? 0 : 1);
-  }
-
-  private static void field(StringBuilder sb, String name, String value) {
-    sb.append("\"").append(esc(name)).append("\": ");
-    if (value == null) {
-      sb.append("null");
-    } else {
-      sb.append("\"").append(esc(value)).append("\"");
-    }
-  }
-
-  private static String esc(String s) {
-    StringBuilder out = new StringBuilder();
-    for (int i = 0; i < s.length(); i++) {
-      char c = s.charAt(i);
-      switch (c) {
-        case '\\': out.append("\\\\"); break;
-        case '"': out.append("\\\""); break;
-        case '\n': out.append("\\n"); break;
-        case '\r': out.append("\\r"); break;
-        case '\t': out.append("\\t"); break;
-        default:
-          if (c < 0x20) {
-            out.append(String.format("\\u%04x", (int)c));
-          } else {
-            out.append(c);
-          }
-      }
-    }
-    return out.toString();
-  }
-}
-"#;
+const JBX_CHECK_COMPILER_COORDINATE: &str = "dev.telegraphic.jbx:jbx-check:0.1.0";
+const JBX_CHECK_COMPILER_MAIN_CLASS: &str = "dev.telegraphic.jbx.check.JbxCheckCompiler";
 
 const JUNIT_GROUP_ID: &str = "org.junit.platform";
 const JUNIT_ARTIFACT_ID: &str = "junit-platform-console-standalone";
@@ -6311,6 +6594,7 @@ fn main() -> Result<()> {
             0
         }
         Some(Commands::Publish(cmd)) => run_publish(cmd)?,
+        Some(Commands::Install(cmd)) => run_install(cmd)?,
         Some(Commands::Docs(cmd)) => run_docs(cmd)?,
         Some(Commands::Check(cmd)) => run_check(cmd)?,
         Some(Commands::Test(cmd)) => run_tests(cmd)?,

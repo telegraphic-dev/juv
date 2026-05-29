@@ -302,7 +302,7 @@ public class Greeter {
         String::from_utf8_lossy(&jar.stderr)
     );
 
-    // Write a POM for the artifact
+    // Write a POM and Maven metadata for the artifact.
     let pom_path = repo_base.join("greeter-1.0.0.pom");
     fs::write(
         &pom_path,
@@ -313,6 +313,20 @@ public class Greeter {
   <version>1.0.0</version>
   <packaging>jar</packaging>
 </project>"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path()
+            .join("repo/com/example/greeter/maven-metadata.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>com.example</groupId>
+  <artifactId>greeter</artifactId>
+  <versioning>
+    <release>1.0.0</release>
+    <versions><version>1.0.0</version></versions>
+  </versioning>
+</metadata>"#,
     )
     .unwrap();
 
@@ -338,7 +352,7 @@ public class Greeter {
         format!(
             r#"
 //REPOS local=http://127.0.0.1:{port}
-//DEPS com.example:greeter:1.0.0
+//DEPS com.example:greeter
 import com.example.Greeter;
 class UseDep {{
   public static void main(String[] args) {{
