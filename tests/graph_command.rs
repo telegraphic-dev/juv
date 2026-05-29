@@ -127,6 +127,38 @@ fn graph_dump_handles_compact_source_without_openrewrite_slf4j_errors() {
 }
 
 #[test]
+fn graph_dump_detects_compact_source_when_top_level_string_contains_brace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("nanocode_brace.java");
+    fs::write(
+        &source,
+        "String template = \"prefix {\";\n\nvoid main() {\n    IO.println(template);\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("kind=method name=\"main\""), "{stdout}");
+    assert!(
+        stdout.contains("kind=variable name=\"template\""),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("kind=literal value=\"prefix {\""),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn graph_dump_json_prints_ast_nodes() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("nanocode_basic.java");

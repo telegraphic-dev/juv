@@ -335,8 +335,28 @@ public final class JbxGraph {
 
     private static int updateBraceDepth(int depth, String line) {
         int next = depth;
+        boolean inString = false;
+        boolean inChar = false;
         for (int i = 0; i < line.length(); i++) {
             char ch = line.charAt(i);
+            if (ch == '\\' && (inString || inChar)) {
+                i++;
+                continue;
+            }
+            if (ch == '"' && !inChar) {
+                inString = !inString;
+                continue;
+            }
+            if (ch == '\'' && !inString) {
+                inChar = !inChar;
+                continue;
+            }
+            if (inString || inChar) {
+                continue;
+            }
+            if (ch == '/' && i + 1 < line.length() && line.charAt(i + 1) == '/') {
+                break;
+            }
             if (ch == '{') {
                 next++;
             } else if (ch == '}') {
