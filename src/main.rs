@@ -527,6 +527,10 @@ struct GraphDumpCommand {
     #[arg(long = "json")]
     json: bool,
 
+    /// Print JavaParser's native JSON serialization instead of the jbx graph shape.
+    #[arg(long = "javaparser-json", conflicts_with = "json")]
+    javaparser_json: bool,
+
     /// Override cache directory.
     #[arg(long = "cache-dir")]
     cache_dir: Option<PathBuf>,
@@ -537,6 +541,10 @@ struct GraphDumpCommand {
 
 #[derive(Parser, Debug)]
 struct GraphPatchCommand {
+    /// Validate --expect-graph-hash against JavaParser's native JSON serialization.
+    #[arg(long = "javaparser-json")]
+    javaparser_json: bool,
+
     /// Expected graph hash from `jbx graph dump` output.
     #[arg(long = "expect-graph-hash")]
     expect_graph_hash: String,
@@ -3496,8 +3504,8 @@ const PALANTIR_ARTIFACT_ID: &str = "palantir-java-format";
 const DEFAULT_JAVAPARSER_VERSION: &str = "3.28.1";
 const JAVAPARSER_GROUP_ID: &str = "com.github.javaparser";
 const JAVAPARSER_ARTIFACT_ID: &str = "javaparser-core";
-const JAVAPARSER_SERIALIZATION_COORDINATE: &str =
-    "com.github.javaparser:javaparser-core-serialization:3.28.1";
+const JAVAPARSER_SERIALIZATION_ARTIFACT_ID: &str = "javaparser-core-serialization";
+const JAVAPARSER_JSON_PROVIDER_COORDINATE: &str = "org.eclipse.parsson:parsson:1.1.7";
 const GRAPH_JACKSON_DATABIND_COORDINATE: &str =
     "com.fasterxml.jackson.core:jackson-databind:2.17.2";
 const JBX_GRAPH_MAIN_CLASS: &str = "dev.telegraphic.jbx.graph.JbxGraph";
@@ -3694,6 +3702,9 @@ struct GraphBackend {
 fn run_graph_dump(cmd: GraphDumpCommand) -> Result<i32> {
     let backend = resolve_graph_backend(cmd.cache_dir.as_deref())?;
     let mut args = vec!["dump".to_string(), cmd.script.to_string_lossy().to_string()];
+    if cmd.javaparser_json {
+        args.push("--javaparser-json".to_string());
+    }
     if cmd.json {
         args.push("--json".to_string());
     }
@@ -3713,6 +3724,9 @@ fn run_graph_patch(cmd: GraphPatchCommand) -> Result<i32> {
         "--expect-graph-hash".to_string(),
         cmd.expect_graph_hash,
     ];
+    if cmd.javaparser_json {
+        args.push("--javaparser-json".to_string());
+    }
     for op in cmd.ops {
         args.push("--op".to_string());
         args.push(op);
@@ -3741,8 +3755,9 @@ fn resolve_graph_backend(cache_dir: Option<&Path>) -> Result<GraphBackend> {
     });
     let cache = cache_root(cache_dir)?.join("deps");
     let coordinates = [
-        format!("com.github.javaparser:javaparser-core:{version}"),
-        JAVAPARSER_SERIALIZATION_COORDINATE.to_string(),
+        format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_ARTIFACT_ID}:{version}"),
+        format!("{JAVAPARSER_GROUP_ID}:{JAVAPARSER_SERIALIZATION_ARTIFACT_ID}:{version}"),
+        JAVAPARSER_JSON_PROVIDER_COORDINATE.to_string(),
         GRAPH_JACKSON_DATABIND_COORDINATE.to_string(),
     ];
     let mut classpath = jbx::resolver::resolve_classpath(&coordinates, &repos, &cache)?;

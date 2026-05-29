@@ -19,7 +19,10 @@ import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.LiteralStringValueExpr;
+import com.github.javaparser.serialization.JavaParserJsonSerializer;
+import jakarta.json.Json;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -47,8 +50,18 @@ public final class JbxGraph {
         String command = args[0];
         Path source = Path.of(args[1]);
         if ("dump".equals(command)) {
-            boolean json = args.length > 2 && "--json".equals(args[2]);
-            System.out.print(dump(source, json));
+            DumpFormat format = DumpFormat.TEXT;
+            for (int i = 2; i < args.length; i++) {
+                if ("--json".equals(args[i])) {
+                    format = DumpFormat.JBX_JSON;
+                } else if ("--javaparser-json".equals(args[i])) {
+                    format = DumpFormat.JAVAPARSER_JSON;
+                } else {
+                    System.err.println("unknown graph dump argument: " + args[i]);
+                    System.exit(2);
+                }
+            }
+            System.out.print(dump(source, format));
             return;
         }
         if ("patch".equals(command)) {
@@ -61,12 +74,15 @@ public final class JbxGraph {
 
     private static void patch(Path source, String[] args) throws IOException {
         String expectedHash = null;
+        boolean javaparserJsonHash = false;
         List<String> ops = new ArrayList<>();
         for (int i = 2; i < args.length; i++) {
             if ("--expect-graph-hash".equals(args[i]) && i + 1 < args.length) {
                 expectedHash = args[++i];
             } else if ("--op".equals(args[i]) && i + 1 < args.length) {
                 ops.add(args[++i]);
+            } else if ("--javaparser-json".equals(args[i])) {
+                javaparserJsonHash = true;
             } else {
                 System.err.println("unknown graph patch argument: " + args[i]);
                 System.exit(2);
@@ -82,8 +98,13 @@ public final class JbxGraph {
         }
 
         ParsedSource parsed = parse(source);
-        String graph = textGraph(source, graphHash(graphBody(source, collectNodes(parsed))), collectNodes(parsed));
-        String actualHash = graphHash(graph);
+        String actualHash;
+        if (javaparserJsonHash) {
+            actualHash = graphHash(javaparserJson(parsed.compilationUnit()));
+        } else {
+            String graph = textGraph(source, graphHash(graphBody(source, collectNodes(parsed))), collectNodes(parsed));
+            actualHash = graphHash(graph);
+        }
         if (!expectedHash.equals(actualHash)) {
             System.err.println("graph hash mismatch: expected " + expectedHash + " but was " + actualHash);
             System.exit(1);
@@ -140,12 +161,15 @@ public final class JbxGraph {
         }
     }
 
-    private static String dump(Path source, boolean json) throws IOException {
+    private static String dump(Path source, DumpFormat format) throws IOException {
         ParsedSource parsed = parse(source);
+        if (format == DumpFormat.JAVAPARSER_JSON) {
+            return javaparserJson(parsed.compilationUnit());
+        }
         List<GraphNode> nodes = collectNodes(parsed);
         String body = graphBody(source, nodes);
         String hash = graphHash(body);
-        if (json) {
+        if (format == DumpFormat.JBX_JSON) {
             return jsonGraph(source, hash, nodes);
         }
         return textGraph(source, hash, nodes);
@@ -292,6 +316,12 @@ public final class JbxGraph {
         return JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root) + "\n";
     }
 
+    private static String javaparserJson(CompilationUnit cu) {
+        StringWriter out = new StringWriter();
+        new JavaParserJsonSerializer().serialize(cu, Json.createGenerator(out));
+        return out + "\n";
+    }
+
     private static ParsedSource parse(Path source) throws IOException {
         String text = Files.readString(source, StandardCharsets.UTF_8);
         ParserConfiguration config = new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE);
@@ -372,6 +402,8 @@ public final class JbxGraph {
     }
 
     private record ParsedSource(CompilationUnit compilationUnit, String text) {}
+
+    private enum DumpFormat { TEXT, JBX_JSON, JAVAPARSER_JSON }
 
     private record SourceRange(int beginLine, int beginColumn, int endLine, int endColumn) {
         @Override

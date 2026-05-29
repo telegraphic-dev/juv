@@ -35,7 +35,8 @@ Implemented now:
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
 - `jbx graph dump <script.java>` print an agent-friendly JavaParser AST graph
 - `jbx graph dump --json <script.java>` print the same JavaParser-derived graph as JSON
-- `jbx graph patch <script.java> --expect-graph-hash <hash> --op '<operation>'` apply checked graph edits through JavaParser and rewrite the source
+- `jbx graph dump --javaparser-json <script.java>` print JavaParser's native AST JSON serialization
+- `jbx graph patch [--javaparser-json] <script.java> --expect-graph-hash <hash> --op '<operation>'` apply checked graph edits through JavaParser and rewrite the source
 - `jbx export local <script.java|alias> [-o app.jar]` export a runnable JAR with local manifest classpath
 - `jbx export portable <script.java|alias> [-o app.jar]` export a runnable JAR plus `lib/` dependencies
 - `jbx export native <script.java|alias> [-o app]` export a native executable via GraalVM `native-image`
@@ -106,6 +107,7 @@ Implemented now:
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
 - `jbx graph dump <script.java>` emits `jbx-graph v1` with stable node ids, a graph hash, and JavaParser-derived classes, methods, calls, variables, literals, source ranges, parent ids, and snippets
 - `jbx graph dump --json <script.java>` emits the same graph as JSON for agents that prefer structured AST input
+- `jbx graph dump --javaparser-json <script.java>` emits JavaParser's native JSON serialization directly; use the SHA-256 of that JSON with `jbx graph patch --javaparser-json --expect-graph-hash <hash>` when patching from the native view
 - Java 25 compact source files and `import module` declarations are parsed directly by JavaParser 3.28.1+
 - `jbx graph patch <script.java> --expect-graph-hash <hash> --op 'set node="#literal-1" field="value" expect="old" value="new"'` validates the graph hash and expected literal value before writing the modified JavaParser AST back to source
 - Java package-aware main-class inference

@@ -293,6 +293,81 @@ fn graph_dump_json_escapes_control_characters() {
 }
 
 #[test]
+fn graph_dump_javaparser_json_uses_native_serializer_shape() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    void main() {\n        String message = \"hello\";\n    }\n}\n",
+    )
+    .unwrap();
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--javaparser-json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["!"], "com.github.javaparser.ast.CompilationUnit");
+    assert!(value["types"].as_array().unwrap().iter().any(|node| {
+        node["!"] == "com.github.javaparser.ast.body.ClassOrInterfaceDeclaration"
+            && node["name"]["identifier"] == "Example"
+    }));
+    assert!(
+        value.get("nodes").is_none(),
+        "native serializer must not emit jbx graph nodes"
+    );
+}
+
+#[test]
+fn graph_patch_accepts_hash_from_javaparser_json_dump_when_flagged() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("Example.java");
+    fs::write(
+        &source,
+        "class Example {\n    void main() {\n        String message = \"hello\";\n    }\n}\n",
+    )
+    .unwrap();
+
+    let dump = jbx_command()
+        .arg("graph")
+        .arg("dump")
+        .arg("--javaparser-json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_success(&dump);
+    let hash = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&dump.stdout));
+
+    let out = jbx_command()
+        .arg("graph")
+        .arg("patch")
+        .arg("--javaparser-json")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("cache"))
+        .arg("--expect-graph-hash")
+        .arg(hash)
+        .arg("--op")
+        .arg("set node=\"#literal-1\" field=\"value\" expect=\"hello\" value=\"goodbye\"")
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let updated = fs::read_to_string(&source).unwrap();
+    assert!(updated.contains("\"goodbye\""), "{updated}");
+    assert!(!updated.contains("\"hello\""), "{updated}");
+}
+
+#[test]
 fn graph_patch_updates_string_literal_through_javaparser_ast() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("Example.java");
