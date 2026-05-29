@@ -1,0 +1,11 @@
+{
+  "name": "jbx-website",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node src/build.mjs",
+    "check": "node src/build.mjs --check",
+    "serve": "python3 -m http.server 4173 --directory dist"
+  }
+}
