@@ -73,9 +73,26 @@ For CI-style checks, add `--fail-on-changes`. For custom recipe modules, add `--
 Discovery commands are machine-readable for agents:
 
 ```bash
-jbx rewrite modules --search yaml --json
+jbx rewrite modules --search yaml --group org.openrewrite.recipe --rewrite-version 8.60.0 --json
 jbx rewrite recipes yaml --search format --detail --json
 ```
+
+## Publishing metadata
+
+`jbx publish --file jbx.json --dry-run` stages Maven-ready artifacts before any real release. Keep the descriptor lean: use `dependencies` (or `//DEPS` in a script) for libraries needed to compile the artifact, and `runtimeDependencies` (or `//RUNTIME`) for runtime-only implementations such as logging backends or recipe helper providers.
+
+```json
+{
+  "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+  "group": "dev.telegraphic.demo",
+  "id": "hello-tool",
+  "version": "1.0.0",
+  "dependencies": ["info.picocli:picocli:4.7.7"],
+  "runtimeDependencies": ["org.slf4j:slf4j-nop:2.0.17"]
+}
+```
+
+Runtime dependencies are emitted to Maven metadata with `runtime` scope and are not required on the compile classpath.
 
 ## Documentation sidecars
 
