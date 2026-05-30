@@ -200,7 +200,8 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
 <body>
 <header class="site-header">
   <a class="mark" href="/"><img src="/assets/jbx-toolbox-logo-256.png" alt="jbx toolbox logo"><span>jbx</span></a>
-  <nav>${nav.map(([href, label]) => {
+  <button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false">Menu</button>
+  <nav id="site-nav" class="site-nav">${nav.map(([href, label]) => {
     const active = route === href || (href === '/docs/' && route.startsWith('/docs/') && !route.startsWith('/docs/commands/')) || (href === '/docs/commands/' && route.startsWith('/docs/commands/'));
     return `<a href="${href}"${active ? ' aria-current="page"' : ''}>${label}</a>`;
   }).join('')}<button class="theme-toggle" type="button" aria-label="Toggle light and dark theme">Theme</button></nav>
@@ -214,6 +215,21 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
 (() => {
   const key = 'jbx-theme';
   const button = document.querySelector('.theme-toggle');
+  const menuButton = document.querySelector('.menu-toggle');
+  const siteNav = document.querySelector('.site-nav');
+  const mobileQuery = matchMedia('(max-width: 760px)');
+  const closeMobileNav = () => {
+    siteNav?.removeAttribute('data-open');
+    menuButton?.setAttribute('aria-expanded', 'false');
+  };
+  menuButton?.addEventListener('click', () => {
+    const open = siteNav?.getAttribute('data-open') === 'true';
+    if (open) siteNav?.removeAttribute('data-open');
+    else siteNav?.setAttribute('data-open', 'true');
+    menuButton.setAttribute('aria-expanded', String(!open));
+  });
+  mobileQuery.addEventListener?.('change', closeMobileNav);
+  if (!mobileQuery.matches) closeMobileNav();
   const preferred = () => matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   const apply = theme => {
     document.documentElement.dataset.theme = theme;
@@ -240,6 +256,13 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
   }
   const commandSearch = document.querySelector('[data-command-search]');
   const commandLinks = [...document.querySelectorAll('[data-command-link]')];
+  const tocDetails = document.querySelector('.toc-details');
+  const syncTocDetails = () => {
+    if (!tocDetails) return;
+    tocDetails.open = !mobileQuery.matches;
+  };
+  syncTocDetails();
+  mobileQuery.addEventListener?.('change', syncTocDetails);
   const filterCommands = () => {
     const query = commandSearch?.value.trim().toLowerCase() || '';
     for (const link of commandLinks) {
@@ -292,7 +315,7 @@ function commandPageBody(markdown, route) {
     const current = fileName === currentFile;
     return `<a href="${href}" data-command-link${current ? ' aria-current="page"' : ''}>${label}</a>`;
   }).join('');
-  const toc = `<aside class="toc" aria-label="Command table of contents"><strong>Commands</strong><label class="toc-search"><span>Search commands</span><input type="search" placeholder="search…" autocomplete="off" data-command-search></label><div class="toc-links">${tocLinks}</div></aside>`;
+  const toc = `<aside class="toc" aria-label="Command table of contents"><details class="toc-details" open><summary>Commands</summary><label class="toc-search"><span>Search commands</span><input type="search" placeholder="search…" autocomplete="off" data-command-search></label><div class="toc-links">${tocLinks}</div></details></aside>`;
   return `<div class="docs-with-toc">${toc}<article class="page commands-reference">${markdownToHtml(markdown)}</article></div>`;
 }
 

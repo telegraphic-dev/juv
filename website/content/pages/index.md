@@ -38,7 +38,7 @@ jbx org.openapitools:openapi-generator-cli
 
 ```bash
 jbx skill list
-jbx skill get init
+jbx skill get jbx-init
 jbx init -t hello hello.java
 jbx fmt hello.java
 jbx init -t test hello_test.java

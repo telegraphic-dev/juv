@@ -1,5 +1,4 @@
 ---
-
 title: jbx run command
 description: Run Java source or Maven artifact
 ---
@@ -10,16 +9,15 @@ Compile and run one Java source file, including Java 25 compact scripts, with JB
 
 ## When to use it
 
-- Run a one-file maintenance script from a repository without creating a Maven or Gradle project.
-- Launch a Java 25 compact script that carries `//DEPS`, `//JAVA`, `//SOURCES`, and runtime options in the file.
+- Run a self-contained Java script without creating a Maven or Gradle project.
+- Launch a compact script that carries `//DEPS`, `//JAVA`, `//SOURCES`, and runtime options in the file.
 - Smoke-test an executable example after `jbx check --json` has confirmed the source compiles.
 
 ## Common workflows
 
 ```bash
-jbx run scripts/Report.java --month 2026-05
-jbx scripts/Report.java --month 2026-05
-jbx run --deps info.picocli:picocli:4.7.7 tools/Cli.java --help
+jbx run report.java --month 2026-05
+jbx com.example:report-cli --month 2026-05
 ```
 
 ## Passing arguments
@@ -30,9 +28,32 @@ Use an explicit `--` only when the Java program needs to receive a literal doubl
 
 ## Real-life examples
 
-### Repository maintenance
+### Start NanoCode Agent
 
-Use `run` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+gh repo clone glaforge/nanocode
+cd nanocode
+export GEMINI_API_KEY="***"
+jbx nanocode_basic.java
+```
+
+### Generate OpenAPI from the specification file
+
+```bash
+jbx org.openapitools:openapi-generator-cli generate \
+  -i openapi.yaml \
+  -g java \
+  -o generated/petstore-client \
+  --api-package com.example.petstore.api \
+  --model-package com.example.petstore.model \
+  --invoker-package com.example.petstore.client
+```
+
+### Start H2 In-Memory Database
+
+```bash
+jbx com.h2database:h2
+```
 
 ### Agent loop
 
