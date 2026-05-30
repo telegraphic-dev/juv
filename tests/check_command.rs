@@ -191,7 +191,7 @@ class UseDep {{
 }
 
 #[test]
-fn check_compiles_source_directives_onto_classpath() {
+fn check_includes_source_directives_in_compilation() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache");
     let source = tmp.path().join("UseHelper.java");
@@ -240,6 +240,50 @@ class Helper {
         0,
         "{stdout}"
     );
+}
+
+#[test]
+fn check_handles_mutual_references_between_target_and_declared_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let main = tmp.path().join("Main.java");
+    fs::write(
+        &main,
+        r#"
+//SOURCES Helper.java
+class Main {
+  static String suffix() { return "!"; }
+  String message() { return Helper.message(); }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("Helper.java"),
+        r#"
+class Helper {
+  static String message() { return "hello" + Main.suffix(); }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--no-error-prone")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&main)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["ok"], true, "{stdout}");
 }
 
 #[test]

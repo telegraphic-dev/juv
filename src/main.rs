@@ -6733,64 +6733,8 @@ fn has_source_or_release_option(options: &[String]) -> bool {
     })
 }
 
-fn compile_check_sources(
-    javac: &Path,
-    source_files: &[PathBuf],
-    output_dir: &Path,
-    classpath: &[PathBuf],
-    javac_options: &[String],
-    enable_preview: bool,
-    jdk_root: &Path,
-) -> Result<()> {
-    if source_files.is_empty() {
-        return Ok(());
-    }
-    if output_dir.exists() {
-        fs::remove_dir_all(output_dir)?;
-    }
-    fs::create_dir_all(output_dir)?;
-    let mut command = ProcessCommand::new(javac);
-    command.arg("-proc:none");
-    command.arg("-d").arg(output_dir);
-    if !classpath.is_empty() {
-        command.arg("-classpath").arg(
-            std::env::join_paths(classpath)
-                .context("failed to build check source compilation classpath")?,
-        );
-    }
-    command.args(javac_options);
-    if enable_preview {
-        if !javac_options
-            .iter()
-            .any(|option| option == "--enable-preview")
-        {
-            command.arg("--enable-preview");
-        }
-        if !has_source_or_release_option(javac_options) {
-            let release_version =
-                jbx::jdk::detect_jdk_major_version(jdk_root).with_context(|| {
-                    format!("could not determine JDK version at {}", jdk_root.display())
-                })?;
-            command.arg("--release").arg(release_version.to_string());
-        }
-    }
-    command.args(source_files);
-    let output = command
-        .output()
-        .with_context(|| format!("failed to execute {}", javac.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "failed to compile //SOURCES for check classpath with exit code {}\n{}{}",
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(())
-}
-
 fn run_check(cmd: CheckCommand) -> Result<i32> {
-    let files = collect_java_files(&cmd.paths)?;
+    let mut files = collect_java_files(&cmd.paths)?;
     if files.is_empty() {
         if cmd.json {
             println!(
@@ -6817,11 +6761,12 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
 
     let jdk_root = jbx::jdk::resolve_jdk(&directives.java_version, true)?;
     let java = jbx::jdk::java_bin_path(&jdk_root);
-    let javac = jbx::jdk::javac_bin_path(&jdk_root);
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
 
     let binary_deps = directives.deps;
-    let declared_sources = inputs.declared_sources;
+    files.extend(inputs.declared_sources);
+    files.sort();
+    files.dedup();
 
     let repos = maven_tool::maven_repositories(&directives.repos);
     let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
@@ -6833,20 +6778,6 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
             &cache_dir,
         )?);
     }
-    let declared_sources_classes_dir = root.join("sources-classes");
-    compile_check_sources(
-        &javac,
-        &declared_sources,
-        &declared_sources_classes_dir,
-        &classpath,
-        &directives.javac_options,
-        directives.enable_preview,
-        &jdk_root,
-    )?;
-    if !declared_sources.is_empty() {
-        classpath.push(declared_sources_classes_dir);
-    }
-
     let mut compiler_options = vec!["-Xlint:all".to_string(), "-proc:none".to_string()];
     let classes_dir = root.join("classes");
     if classes_dir.exists() {
