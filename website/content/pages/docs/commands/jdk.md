@@ -43,7 +43,9 @@ Use `jdk` when `JAVA_HOME`, CI image defaults, or compact-source support are in 
 
 ## Agent notes
 
-Installing a JDK changes machine state. In shared CI images or developer machines, prefer reporting the missing version unless installation is part of the task.
+Java/JDK is not a prerequisite for installing or starting with `jbx`. If `jbx` is missing, install `jbx` first; do not install an OS JDK just to make `jbx` usable. `jbx` discovers existing JDKs and provisions the required Temurin JDK itself when a command actually needs Java.
+
+Installing a JDK changes machine state. In shared CI images or developer machines, prefer reporting the missing version unless installation is explicitly part of the task.
 
 ## Verification checklist
 

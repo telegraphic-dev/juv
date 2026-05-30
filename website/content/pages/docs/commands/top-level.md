@@ -64,6 +64,7 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 
 ## Agent notes
 
+- Java/JDK is not a prerequisite for installing or starting with `jbx`. If `jbx` is missing, install `jbx` first; do not install an OS JDK just to make `jbx` usable. `jbx` discovers existing JDKs and provisions the required Temurin JDK itself when a command actually needs Java.
 - Use `jbx skill list --json` for discovery.
 - Fetch the command-specific skill before running non-trivial commands.
 - Prefer explicit subcommands over relying on top-level shorthand in automation.
