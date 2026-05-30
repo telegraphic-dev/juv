@@ -64,3 +64,9 @@ PY
 
 validate_skill_tree skill-data
 validate_skill_tree skills
+
+unexpected_static_skills=$(find skills -mindepth 1 -maxdepth 1 -type d ! -name jbx -print | sort)
+if [[ -n "$unexpected_static_skills" ]]; then
+  printf 'Only skills/jbx is allowed as a public discovery stub; command skills must be served from the jbx binary. Unexpected static skills:\n%s\n' "$unexpected_static_skills" >&2
+  exit 1
+fi

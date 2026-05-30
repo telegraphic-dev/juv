@@ -43,7 +43,7 @@ Use `jdk` when `JAVA_HOME`, CI image defaults, or compact-source support are in 
 
 ## Agent notes
 
-Installing a JDK changes machine state. In shared CI images or developer machines, prefer reporting the missing version unless installation is part of the task.
+Installing a JDK changes machine state. In shared CI images or developer machines, prefer reporting the missing version unless installation is explicitly part of the task.
 
 ## Verification checklist
 

@@ -270,6 +270,40 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
   for (const tab of installTabs) {
     tab.addEventListener('click', () => showInstallPanel(tab.dataset.installTab));
   }
+  const copyButtons = [...document.querySelectorAll('[data-copy-command]')];
+  const copyText = async text => {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    textarea.remove();
+    if (!ok) throw new Error('execCommand copy failed');
+  };
+  for (const copyButton of copyButtons) {
+    const originalLabel = copyButton.textContent;
+    copyButton.addEventListener('click', async () => {
+      try {
+        await copyText(copyButton.dataset.copyCommand || '');
+        copyButton.textContent = 'Copied';
+        copyButton.dataset.copied = 'true';
+        window.setTimeout(() => {
+          copyButton.textContent = originalLabel;
+          delete copyButton.dataset.copied;
+        }, 1600);
+      } catch {
+        copyButton.textContent = 'Failed';
+        window.setTimeout(() => { copyButton.textContent = originalLabel; }, 1600);
+      }
+    });
+  }
   const commandSearch = document.querySelector('[data-command-search]');
   const commandLinks = [...document.querySelectorAll('[data-command-link]')];
   const tocDetails = document.querySelector('.toc-details');

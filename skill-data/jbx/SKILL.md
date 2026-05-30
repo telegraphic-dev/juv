@@ -12,6 +12,7 @@ The top-level command stays intentionally thin. It gives humans a fast run path 
 ## Start here
 
 ```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
 jbx skill list
 jbx skill list --json
 ```

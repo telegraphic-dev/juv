@@ -35,6 +35,7 @@ jbx cache path
 
 ## Good agent behavior
 
+- Use `jbx skill list` to discover the exact command skills bundled with the installed binary.
 - Run the tightest command that answers the question.
 - Use `jbx doctor --json` before guessing about broken JDKs, unreachable Maven metadata, unwritable caches, formatter fallback, remote trust, dependency resolution, or optional publishing/native toolchain setup. Add `--cache-dir` for isolated agent runs, `--repo`/`--repos` for extra repositories, `--publish` for GPG checks, and `--native` for GraalVM `native-image` checks.
 - Start with `jbx skill get` when you need version-matched workflow guidance for the installed binary.
