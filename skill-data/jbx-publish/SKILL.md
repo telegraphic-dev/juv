@@ -32,28 +32,30 @@ jbx publish --file jbx.json --serve 0
 
 Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload belongs in release automation with approved credentials. The descriptor fields are documented in the [`jbx.json` reference](/docs/jbx-json/).
 
-### Release helper artifacts through GitHub Actions
+### Publish a release through GitHub Actions
 
-A real pattern from `telegraphic-dev/jbx-utils` is to verify bundles in PR CI, then publish only from release/manual workflow. The repository has `jbx-check`, `jbx-graph`, and `jbx-rewrite` descriptors and publishes each artifact through a matrix:
+Keep PR checks boring: build the bundle without credentials, and publish only from a release/manual workflow. A minimal single-artifact release job looks like this:
 
 ```yaml
-strategy:
-  fail-fast: false
-  matrix:
-    project: [jbx-check, jbx-graph, jbx-rewrite]
 steps:
   - uses: actions/checkout@v4
   - uses: actions/setup-java@v4
     with:
       distribution: temurin
-      java-version: '21'
+      java-version: '25'
   - uses: dtolnay/rust-toolchain@stable
   - name: Install jbx
     run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
-  - name: Publish ${{ matrix.project }}
+  - name: Import GPG signing key
+    uses: crazy-max/ghaction-import-gpg@v6
+    with:
+      gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+      passphrase: ${{ secrets.GPG_PASSPHRASE }}
+  - name: Publish
     env:
       CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
       CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+      GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
     run: |
       VERSION="${{ github.event.inputs.version }}"
       if [ -z "$VERSION" ]; then
@@ -61,14 +63,15 @@ steps:
       fi
       jbx publish \
         --publish \
-        --file "${{ matrix.project }}/jbx.json" \
+        --file jbx.json \
         --version "$VERSION" \
-        --output "target/${{ matrix.project }}-central-bundle.zip" \
-        --target-dir "target/publish/${{ matrix.project }}" \
+        --gpg-key "$GPG_KEY_ID" \
+        --output target/central-bundle.zip \
+        --target-dir target/publish \
         --cache-dir .jbx-cache
 ```
 
-That workflow also imports `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE` before publishing. Keep the normal PR workflow on `jbx publish --dry-run --skip-signing`; no Portal credentials should be needed for review builds.
+The release workflow needs `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`, and `GPG_KEY_ID`. Keep the normal PR workflow on `jbx publish --dry-run --skip-signing`; no Portal credentials or signing key should be needed for review builds.
 
 ### Agent loop
 

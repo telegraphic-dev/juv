@@ -209,7 +209,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install jbx
         run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
@@ -217,7 +217,7 @@ jobs:
         run: scripts/verify-publish-bundle.sh
 ```
 
-Then keep real Maven Central uploads in a separate release/manual workflow. The workflow needs these GitHub secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, and `GPG_PASSPHRASE`.
+Then keep real Maven Central uploads in a separate release/manual workflow. The workflow needs these GitHub secrets: `CENTRAL_TOKEN_USERNAME`, `CENTRAL_TOKEN_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`, and `GPG_KEY_ID`.
 
 ```yaml
 name: Publish to Maven Central
@@ -246,11 +246,11 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install jbx
         run: cargo install --git https://github.com/telegraphic-dev/jbx.git --locked jbx
-      - name: Import GPG key
+      - name: Import GPG signing key
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -259,6 +259,7 @@ jobs:
         env:
           CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           if [ -z "$VERSION" ]; then
@@ -268,6 +269,7 @@ jobs:
             --publish \
             --file "${{ matrix.project }}/jbx.json" \
             --version "$VERSION" \
+            --gpg-key "$GPG_KEY_ID" \
             --output "target/${{ matrix.project }}-central-bundle.zip" \
             --target-dir "target/publish/${{ matrix.project }}" \
             --cache-dir .jbx-cache
@@ -276,7 +278,7 @@ jobs:
 Two details matter:
 
 - The PR workflow runs `--dry-run --skip-signing` through a script so contributors can verify jars, POMs, sources, javadocs, docs sidecars, and bundle layout without secrets.
-- Only the release/manual workflow runs `--publish`; publishing from ordinary PR CI would be reckless and noisy.
+- Only the release/manual workflow imports the signing key and runs `--publish`; publishing from ordinary PR CI would be reckless and noisy.
 
 ## Descriptor and directives
 
