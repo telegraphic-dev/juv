@@ -67,7 +67,7 @@ Executable Maven artifacts can be invoked directly:
 jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 ```
 
-Use `--main` when an artifact exposes more than one entry point.
+Use `--main` when an artifact exposes more than one entry point. For the full publish-and-run path, see the [end-to-end Maven tool guide](/docs/end-to-end-maven-tool/).
 
 ## OpenRewrite recipes
 

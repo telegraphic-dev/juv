@@ -167,6 +167,8 @@ jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 # runs an executable JAR from Maven coordinates
 ```
 
+The website includes an end-to-end guide that builds a representative Picocli-based Java CLI, verifies it with the jbx development loop, publishes it to Maven Central, and runs it back as `jbx group:artifact:version`.
+
 ### `jbx.json` publish descriptor
 
 ```json
