@@ -1,6 +1,6 @@
 ---
 name: jbx-init
-description: Create Java 25+ scripts from built-in or imported templates.
+description: "Create Java 25+ scripts from built-in or imported templates."
 ---
 
 # `init`

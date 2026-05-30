@@ -1,6 +1,6 @@
 ---
 name: jbx-search
-description: Search Maven Central artifacts by text or coordinates.
+description: "Search Maven Central artifacts by text or coordinates."
 ---
 
 # `search`

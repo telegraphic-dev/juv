@@ -1,6 +1,6 @@
 ---
 name: jbx-export
-description: Export local, portable, or native runnable artifacts.
+description: "Export local, portable, or native runnable artifacts."
 ---
 
 # `export`

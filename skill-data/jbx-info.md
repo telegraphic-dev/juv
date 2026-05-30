@@ -1,6 +1,6 @@
 ---
 name: jbx-info
-description: Print parsed directives and derived metadata from Java scripts.
+description: "Print parsed directives and derived metadata from Java scripts."
 ---
 
 # `info`

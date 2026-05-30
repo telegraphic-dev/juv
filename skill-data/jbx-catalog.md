@@ -1,6 +1,6 @@
 ---
 name: jbx-catalog
-description: Add and list external catalogs in `jbang-catalog.json`.
+description: "Add and list external catalogs in `jbang-catalog.json`."
 ---
 
 # `catalog`

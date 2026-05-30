@@ -7,12 +7,12 @@ git diff --check
 generator_diff_before="$(mktemp)"
 generator_diff_after="$(mktemp)"
 trap 'rm -f "$generator_diff_before" "$generator_diff_after"' EXIT
-git diff --binary -- website/content/pages/docs/commands skill-data skills > "$generator_diff_before"
+git diff --binary -- website/content/pages/docs/commands skill-data SKILL.md skills > "$generator_diff_before"
 python3 scripts/generate-agent-docs.py
-git diff --binary -- website/content/pages/docs/commands skill-data skills > "$generator_diff_after"
+git diff --binary -- website/content/pages/docs/commands skill-data SKILL.md skills > "$generator_diff_after"
 if ! cmp -s "$generator_diff_before" "$generator_diff_after"; then
   printf 'Generated command docs/skills are out of date. Run scripts/generate-agent-docs.py and commit the result.\n' >&2
-  git diff --stat -- website/content/pages/docs/commands skill-data skills >&2
+  git diff --stat -- website/content/pages/docs/commands skill-data SKILL.md skills >&2
   exit 1
 fi
 npm --prefix website run check
@@ -22,20 +22,14 @@ if [[ -f website/public/install.sh ]]; then
   bash -n website/public/install.sh
 fi
 
-validate_skill_tree() {
-  local root="$1"
-  [[ -d "$root" ]] || return 0
+validate_skill_file() {
+  local skill_file="$1"
+  [[ -f "$skill_file" ]] || {
+    printf 'Missing installable skill file %s\n' "$skill_file" >&2
+    return 1
+  }
 
-  local found=0
-  while IFS= read -r -d '' skill_dir; do
-    found=1
-    local skill_file="$skill_dir/SKILL.md"
-    if [[ ! -f "$skill_file" ]]; then
-      printf 'Missing %s\n' "$skill_file" >&2
-      return 1
-    fi
-
-    python3 - "$skill_file" <<'PY'
+  python3 - "$skill_file" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -51,15 +45,12 @@ except ValueError:
 for field in ("name", "description"):
     if not re.search(rf"(?m)^{field}:\s*\S", frontmatter):
         raise SystemExit(f"{path}: missing frontmatter field {field}")
+description = re.search(r'(?m)^description:\s*(.+)$', frontmatter).group(1)
+if not (description.startswith('"') and description.endswith('"')):
+    raise SystemExit(f"{path}: description must be quoted YAML")
 if not re.search(r"(?m)^#\s+\S", body):
     raise SystemExit(f"{path}: missing markdown heading")
 PY
-  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
-
-  if [[ "$found" -eq 0 ]]; then
-    printf 'No skill directories found under %s\n' "$root" >&2
-    return 1
-  fi
 }
 
 validate_flat_skill_files() {
@@ -98,6 +89,9 @@ if path.stem != name_match.group(1):
     raise SystemExit(f"{path}: filename must match skill name {name_match.group(1)}")
 if not re.search(r"(?m)^description:\s*\S", frontmatter):
     raise SystemExit(f"{path}: missing frontmatter field description")
+description = re.search(r'(?m)^description:\s*(.+)$', frontmatter).group(1)
+if not (description.startswith('"') and description.endswith('"')):
+    raise SystemExit(f"{path}: description must be quoted YAML")
 if not re.search(r"(?m)^#\s+\S", body):
     raise SystemExit(f"{path}: missing markdown heading")
 PY
@@ -110,10 +104,9 @@ PY
 }
 
 validate_flat_skill_files skill-data
-validate_skill_tree skills
+validate_skill_file SKILL.md
 
-unexpected_static_skills=$(find skills -mindepth 1 -maxdepth 1 -type d ! -name jbx -print | sort)
-if [[ -n "$unexpected_static_skills" ]]; then
-  printf 'Only skills/jbx is allowed as a public discovery stub; command skills must be served from the jbx binary. Unexpected static skills:\n%s\n' "$unexpected_static_skills" >&2
+if [[ -d skills ]]; then
+  printf 'Installable static skill must live at repository root SKILL.md for npx skills add telegraphic-dev/jbx; command skills must be served by the jbx binary, not exposed as static SKILL.md trees. Remove skills/.\n' >&2
   exit 1
 fi

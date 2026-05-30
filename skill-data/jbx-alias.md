@@ -1,6 +1,6 @@
 ---
 name: jbx-alias
-description: Add, remove, and list aliases from `jbang-catalog.json`.
+description: "Add, remove, and list aliases from `jbang-catalog.json`."
 ---
 
 # `alias`

@@ -1,6 +1,6 @@
 ---
 name: jbx-cache
-description: Inspect or clear compiled-script cache paths and entries.
+description: "Inspect or clear compiled-script cache paths and entries."
 ---
 
 # `cache`

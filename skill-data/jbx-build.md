@@ -1,6 +1,6 @@
 ---
 name: jbx-build
-description: Compile a script into the jbx cache without running it.
+description: "Compile a script into the jbx cache without running it."
 ---
 
 # `build`

@@ -1,6 +1,6 @@
 ---
 name: jbx-check
-description: Check Java source with structured diagnostics.
+description: "Check Java source with structured diagnostics."
 ---
 
 # `check`

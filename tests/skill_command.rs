@@ -30,6 +30,10 @@ fn skill_get_defaults_to_jbx_skill() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.starts_with("---\nname: jbx\n"), "{stdout}");
+    assert!(
+        stdout.contains("description: \"Use jbx for Java development and automation"),
+        "{stdout}"
+    );
     assert!(stdout.contains("jbx skill list --json"), "{stdout}");
     assert!(
         stdout.contains("Usage: jbx [OPTIONS] [SCRIPT] [ARGS]... [COMMAND]"),
@@ -96,5 +100,27 @@ fn skill_get_command_skill() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.starts_with("---\nname: jbx-check\n"), "{stdout}");
+    assert!(
+        stdout.contains("description: \"Check Java source with structured diagnostics.\""),
+        "{stdout}"
+    );
     assert!(stdout.contains("jbx check src --json"), "{stdout}");
+}
+
+#[test]
+fn skill_get_matches_committed_flat_skill_data() {
+    for (name, expected) in [
+        ("jbx", include_str!("../skill-data/jbx.md")),
+        ("jbx-check", include_str!("../skill-data/jbx-check.md")),
+        ("jbx-run", include_str!("../skill-data/jbx-run.md")),
+    ] {
+        let out = jbx_command()
+            .arg("skill")
+            .arg("get")
+            .arg(name)
+            .output()
+            .unwrap();
+        assert_success(&out);
+        assert_eq!(String::from_utf8_lossy(&out.stdout), expected, "{name}");
+    }
 }

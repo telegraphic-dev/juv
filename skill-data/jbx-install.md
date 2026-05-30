@@ -1,6 +1,6 @@
 ---
 name: jbx-install
-description: Install the current project into a Maven repository layout.
+description: "Install the current project into a Maven repository layout."
 ---
 
 # `install`

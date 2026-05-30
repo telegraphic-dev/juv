@@ -1,6 +1,6 @@
 ---
 name: jbx-publish
-description: Build Maven-ready bundles, local served repositories, or Portal uploads.
+description: "Build Maven-ready bundles, local served repositories, or Portal uploads."
 ---
 
 # `publish`

@@ -7866,9 +7866,13 @@ fn skill_content_from_page(skill: &SkillEntry) -> String {
     format!(
         "---\nname: {}\ndescription: {}\n---\n\n{}",
         skill.name,
-        skill.description,
+        yaml_double_quote(skill.description),
         body.trim_end()
     ) + "\n"
+}
+
+fn yaml_double_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn strip_markdown_frontmatter(markdown: &str) -> &str {

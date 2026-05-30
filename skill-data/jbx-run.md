@@ -1,6 +1,6 @@
 ---
 name: jbx-run
-description: Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
+description: "Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides."
 ---
 
 # `run`
