@@ -64,7 +64,7 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 
 - Use `jbx skill list --json` for discovery.
 - Fetch the command-specific skill before running non-trivial commands.
-- For fresh Java work, follow the boring loop: list templates, initialize from the closest template, search and read docs for unknown APIs, generate the source, format it, check it, write tests, run tests, then report done. There is a subcommand for each of these steps.
+- For fresh Java work, use `jbx` for the concrete tooling steps: list templates, initialize from the closest template, inspect API docs, format the source, check diagnostics, and run tests. Writing source/tests and reporting results are still agent work.
 - Prefer explicit subcommands over relying on top-level shorthand in automation.
 - Treat top-level script/tool execution as code execution; inspect before running unknown inputs.
 

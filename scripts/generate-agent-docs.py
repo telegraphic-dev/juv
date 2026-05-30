@@ -104,6 +104,10 @@ jbx --version
 
 Do **not** install an OS Java/JDK just to make `jbx` usable. Java/JDK is not a prerequisite for installing or starting with `jbx`; the binary discovers existing JDKs and provisions the required Temurin JDK when a Java command actually needs Java.
 
+## Development Loop
+
+For fresh Java work, use `jbx` for the concrete tooling steps: list templates, initialize from the closest template, inspect API docs, format the source, check diagnostics, and run tests. Writing source/tests and reporting results are still agent work; discover the relevant command-specific guidance with `jbx skill list` and `jbx skill get <name>`.
+
 ## Version-Matched Skills
 
 This file is a discovery stub. Do not treat it as the full jbx workflow.
