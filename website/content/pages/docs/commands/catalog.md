@@ -24,31 +24,36 @@ jbx catalog add local ./tools/jbang-catalog.json
 
 ## Real-life examples
 
-### Repository maintenance
+### Add a shared team catalog
 
-Use `catalog` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx catalog list --json
+jbx catalog add team https://example.com/jbang-catalog.json
+jbx catalog list --json
+```
+
+Use `catalog` when a repository imports shared aliases or templates. List first so you do not add duplicate names or shadow a local catalog entry by accident.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-catalog`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Read existing catalogs with `jbx catalog list --json`.
+2. Add one catalog with a clear name and URL/path.
+3. Re-read list output and verify the new entry.
+4. Inspect `git diff jbang-catalog.json` before relying on imported aliases.
 
 ## Agent notes
 
-Catalog changes affect command discovery. List first, avoid duplicate names, and prefer pinned/reviewed URLs over random raw links.
+Catalog URLs are part of the repository's executable discovery path. Prefer stable HTTPS URLs or checked-in relative paths; avoid personal scratch URLs.
 
 ## JSON and schema
 
-`jbx catalog list --json` returns catalog names, URLs, and local resolution details. Website schema: `/docs/schemas/#catalog-json`.
+`jbx catalog list --json` returns imported catalog names and locations. Website schema: `/docs/schemas/#catalog-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- New catalog entry has the intended name and URL/path.
+- Existing catalog entries are unchanged.
+- Imported aliases/templates resolve only after the catalog is trusted by the repository owner.
 
 ## Arguments and flags
 

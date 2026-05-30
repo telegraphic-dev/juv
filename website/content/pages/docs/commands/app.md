@@ -24,31 +24,37 @@ jbx app uninstall report
 
 ## Real-life examples
 
-### Repository maintenance
+### Install a checked-in tool as a shell command
 
-Use `app` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx app install tools/report.java --name report
+jbx app list
+report --help
+```
+
+Use `app` for scripts the team runs repeatedly: release helpers, report generators, local maintenance tools. Keep the installed command name boring and stable.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-app`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Inspect the script with `jbx info directives tools/report.java`.
+2. Install with an explicit `--name`.
+3. Confirm `jbx app list` shows the wrapper.
+4. Run the wrapper's `--help` or another harmless command before using it in automation.
 
 ## Agent notes
 
-Installing modifies user PATH-facing state. Confirm intent unless the task explicitly asks for installation. After install, run the command with `--help` or a harmless argument.
+Installing an app changes the user's PATH-visible tool surface. Prefer explicit names and remove old wrappers with `jbx app uninstall` when a script is renamed.
 
 ## JSON and schema
 
-No `--json` mode yet. Use `app list` for installed command names and paths.
+No `--json` mode is documented for `app`; use the human list output plus filesystem/PATH checks.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- `jbx app list` shows the installed command.
+- The wrapper command resolves on PATH in the intended shell or CI image.
+- `jbx app uninstall <name>` removes stale wrappers when cleaning up.
+- The underlying script still passes `jbx check --json` if it is source-controlled.
 
 ## Arguments and flags
 

@@ -23,30 +23,36 @@ jbx init -t test hello_test.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Start a testable compact Java script
 
-Use `init` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx template list --json
+jbx init -t test hello_test.java
+jbx test hello_test.java --json
+```
+
+Use `init` to create a file that already matches jbx conventions instead of hand-writing shebangs, directives, and boilerplate.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Discover templates with `jbx template list --json`.
+2. Choose the smallest template that matches the requested artifact.
+3. Generate into the intended directory with `--force` only when replacing is deliberate.
+4. Run the natural next gate: `jbx check --json`, `jbx test --json`, or `jbx run`.
 
 ## Agent notes
 
-This creates files. If the target exists, do not overwrite without explicit instruction. After creation, inspect the file and run the narrowest validation command.
+Generated files are starting points. Rename packages/classes and descriptions immediately so template names do not leak into user code.
 
 ## JSON and schema
 
-No `--json` mode yet. The output is a newly created file; verify by checking the file and running `jbx check --json`.
+No `--json` mode is documented for `init`; use `jbx template list --json` for structured template discovery.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Generated file exists at the requested path.
+- `git diff` shows only intended new or replaced files.
+- The generated source passes the relevant jbx gate before further editing.
 
 ## Arguments and flags
 

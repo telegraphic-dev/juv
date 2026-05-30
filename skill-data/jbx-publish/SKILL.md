@@ -23,30 +23,35 @@ jbx publish --file jbx.json --publish
 
 ## Real-life examples
 
-### Repository maintenance
+### Dry-run a Maven Central bundle before release
 
-Use `publish` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx publish --file jbx.json --dry-run
+jbx publish --file jbx.json --serve 0
+```
+
+Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload belongs in release automation with approved credentials.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Validate project metadata and run tests before publishing steps.
+2. Run `jbx publish --dry-run` and inspect the generated bundle.
+3. Use `--serve 0` for local repository integration tests.
+4. Reserve `--publish` for explicit release workflows.
 
 ## Agent notes
 
-Publishing can be external and irreversible. Use `--dry-run` first, inspect generated POMs/artifacts/signatures, and ask before real Portal upload unless explicitly requested.
+Publishing is the command with the sharpest edges. Never use `--publish` just to satisfy a docs or PR check.
 
 ## JSON and schema
 
-No `--json` mode yet. Use dry-run output and generated bundle files as the verification contract.
+No `--json` mode is documented for `publish`; verify generated bundle files, served repository responses, or Portal status from release automation.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Dry-run bundle contains valid POM, jars, docs sidecars, checksums, and signatures when signing is enabled.
+- `--serve 0` prints a loopback URL and serves Maven metadata.
+- Real publishing is gated by explicit release intent and secrets.
 
 ## Arguments and flags
 

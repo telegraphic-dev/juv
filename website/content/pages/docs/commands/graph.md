@@ -24,31 +24,35 @@ jbx graph dump src/main/java/com/acme/App.java | jq .
 
 ## Real-life examples
 
-### Repository maintenance
+### Inspect Java structurally before a precise edit
 
-Use `graph` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx graph dump src/main/java/com/acme/App.java > App.ast.json
+jq '.types // .' App.ast.json
+```
+
+Use `graph` when regex would be reckless: compact scripts, nested classes, imports, annotations, or literal edits.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-graph`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Dump the AST for the exact file being edited.
+2. Locate the structural node and confirm the current value.
+3. Make the source or AST change with stale-context checks.
+4. Re-run `jbx graph dump` and `jbx check --json`.
 
 ## Agent notes
 
-Prefer AST operations for structural changes, but verify with `jbx check --json` after import. Treat generated source as code changes requiring review.
+Prefer source edits unless AST import is explicitly needed. If importing JSON, preserve parser metadata and verify formatting afterward.
 
 ## JSON and schema
 
-`dump` emits JavaParser native AST JSON. `import` consumes that JSON and writes Java source. This is an AST interchange format, not a stable semantic schema for public APIs.
+`jbx graph dump` emits JavaParser-native AST JSON. Website schema: `/docs/schemas/#graph-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Dump output parses as JSON.
+- Imported source compiles with `jbx check --json`.
+- `git diff` shows the intended structural change, not a full-file rewrite surprise.
 
 ## Arguments and flags
 

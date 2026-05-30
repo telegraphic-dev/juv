@@ -23,30 +23,35 @@ jbx install src/main/java/com/acme/Tool.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Install a local artifact into an isolated Maven repo
 
-Use `install` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx install --file jbx.json --destination build/local-m2
+jbx resolve --repo local=build/local-m2 com.acme:tool:1.0.0
+```
+
+Use `install` to test Maven metadata and local consumption before publishing or wiring another script to the artifact.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Build or check the project first.
+2. Install into an explicit temporary destination for CI/review loops.
+3. Resolve the installed coordinate from that destination.
+4. Inspect generated POM and metadata when publish behavior is involved.
 
 ## Agent notes
 
-Prefer a temporary `--destination` during automated tests to avoid polluting the developer’s real `~/.m2`. Verify the installed coordinates by resolving them.
+Defaulting to `~/.m2/repository` is convenient for humans but noisy for agents. Prefer `--destination build/local-m2` in reproducible workflows.
 
 ## JSON and schema
 
-No `--json` mode yet. Verification is the installed POM/JAR path under the target repository.
+No `--json` mode is documented for `install`; verify by filesystem layout and a follow-up `resolve`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Jar, sources/javadocs where applicable, POM, and metadata are present under Maven layout.
+- A follow-up `jbx resolve --repo local=<dest> <gav>` succeeds.
+- No real Maven Central publishing occurs from an install flow.
 
 ## Arguments and flags
 

@@ -23,30 +23,35 @@ jbx search --group com.fasterxml.jackson.core --id jackson-databind --version 2.
 
 ## Real-life examples
 
-### Repository maintenance
+### Find the exact coordinate before adding a dependency
 
-Use `search` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx search --group org.junit.platform --id junit-platform-console-standalone --json
+jbx search --group com.fasterxml.jackson.core --id jackson-databind --version 2.17.2 --json
+```
+
+Use `search` when you know a library name but need the Maven coordinate, latest version, or exact artifactId.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Search with `--json` and the narrowest known filters.
+2. Prefer exact group/artifact matches over popularity guesses.
+3. Copy the full coordinate into `//DEPS` or `jbx resolve`.
+4. Resolve or compile before treating the dependency choice as correct.
 
 ## Agent notes
 
-Prefer exact group/artifact filters once a candidate is known. Do not auto-upgrade production dependencies solely because search shows a newer version.
+Maven Central search is discovery, not endorsement. Do not pick a dependency only because it appears first; check group, artifactId, version, and project legitimacy.
 
 ## JSON and schema
 
-`--json` returns query metadata, `numFound`, and artifact records. Website schema: `/docs/schemas/#search-json`.
+`jbx search --json` returns the query, total count, and normalized artifact candidates. Website schema: `/docs/schemas/#search-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Result includes the expected groupId and artifactId.
+- Version is explicit when adding a dependency.
+- Follow-up `jbx resolve <gav>` or `jbx check --json` succeeds.
 
 ## Arguments and flags
 

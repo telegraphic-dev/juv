@@ -24,31 +24,35 @@ jbx docs docs/my-library-jbx-docs.json
 
 ## Real-life examples
 
-### Repository maintenance
+### Inspect a dependency before coding against it
 
-Use `docs` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx docs com.fasterxml.jackson.core:jackson-databind:2.17.2 --json
+jbx docs src/main/java
+```
+
+Use `docs` to put API facts into the agent context without opening a browser or decompiling jars. Prefer remote sidecars when available; generate local docs fresh for local sources.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-docs`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Fetch docs for the exact source path or Maven coordinate.
+2. Use Markdown for reading and `--json` for structured lookup.
+3. Verify the documented type/member exists before editing caller code.
+4. Cache only remote artifact docs; regenerate local source docs after edits.
 
 ## Agent notes
 
-Use docs before guessing APIs. Prefer JSON when extracting types/methods programmatically; use Markdown for human handoff. If a Maven artifact has a sidecar, trust the sidecar version that matches the artifact coordinate.
+Docs output is context, not a build result. If docs reveal a method signature, still compile or test the caller after using it.
 
 ## JSON and schema
 
-`--json` follows the published docs sidecar schema in `/docs/jbx-docs-schema/` and is summarized at `/docs/schemas/#docs-json`.
+`jbx docs ... --json` returns docs metadata, generated source info, and structured type/member details. Website schema: `/docs/schemas/#docs-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Coordinate includes a version when reproducibility matters.
+- Local source docs are regenerated after source changes.
+- Markdown sidecar and JSON sidecar agree for published artifacts.
 
 ## Arguments and flags
 

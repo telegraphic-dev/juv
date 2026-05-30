@@ -23,30 +23,35 @@ jbx init --template cli Hello.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Choose a starter before generating a file
 
-Use `template` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx template list --json
+jbx init --template cli tools/hello.java
+```
+
+Use `template` before `init` when you need to know whether the repo or imported catalogs already provide the right starter.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. List templates with `jbx template list --json`.
+2. Match the template purpose to the requested output: compact script, CLI, agent tool, or test.
+3. Generate with `jbx init --template <name> <path>`.
+4. Run the natural gate for the generated file.
 
 ## Agent notes
 
-Run `template list --json` before `init` when the requested shape is vague. Prefer templates from the current repository/catalog over generic guesses.
+Templates encode conventions. Prefer an existing team/catalog template over inventing a new file shape.
 
 ## JSON and schema
 
-`jbx template list --json` returns template names, descriptions, origin catalog, and parameters when known.
+`jbx template list --json` returns built-in and catalog template metadata. Website schema: `/docs/schemas/#template-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Selected template appears in list output.
+- Generated file path and template match the task.
+- The file passes `jbx check --json`, `jbx test --json`, or `jbx run` as appropriate.
 
 ## Arguments and flags
 

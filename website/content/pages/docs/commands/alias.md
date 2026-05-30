@@ -24,20 +24,26 @@ jbx alias remove hello
 
 ## Real-life examples
 
-### Repository maintenance
+### Rename a repository script without breaking discovery
 
-Use `alias` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx alias list --json
+jbx alias add smoke tools/smoke.java --description "Run the local smoke test"
+jbx alias remove old-smoke
+```
+
+Use `alias` when a repo wants a stable command name in `jbang-catalog.json`. Read the catalog first, add the new alias with a useful description, then remove stale names only after callers have moved.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-alias`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Read the current catalog with `jbx alias list --json`.
+2. Add or remove one alias at a time.
+3. Re-read `jbx alias list --json` and confirm the target path and description.
+4. Inspect `git diff jbang-catalog.json` before committing.
 
 ## Agent notes
 
-Read `alias list --json` before changing a catalog. Preserve human descriptions because they become discovery text for future agents.
+Preserve descriptions; they are future discovery text for humans and agents. Do not guess alias targets from filenames if the catalog already says otherwise.
 
 ## JSON and schema
 
@@ -45,10 +51,10 @@ Read `alias list --json` before changing a catalog. Preserve human descriptions 
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- `jbx alias list --json` includes the expected alias name, target, and description.
+- `jbang-catalog.json` contains only the intended catalog change.
+- Removed aliases no longer appear in list output.
+- A follow-up `jbx <alias>` resolves to the intended script when execution is safe.
 
 ## Arguments and flags
 

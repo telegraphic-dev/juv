@@ -24,31 +24,36 @@ jbx cache clear
 
 ## Real-life examples
 
-### Repository maintenance
+### Debug a stale compiled script on CI
 
-Use `cache` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx cache path
+jbx cache list --json
+jbx cache clear
+```
+
+Use `cache` to answer “what did jbx compile and where did it put it?” before deleting anything. Clearing cache is a repair step, not a first reflex.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-cache`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Locate the active cache with `jbx cache path`.
+2. Inspect entries with `jbx cache list --json`.
+3. Clear only when stale or corrupt entries explain the failure.
+4. Re-run the original `build`, `check`, or `run` command to recreate evidence.
 
 ## Agent notes
 
-Never clear caches blindly during a debugging task; list first and scope destructive cleanup. Cache paths are machine-local facts, not portable configuration.
+Cache state is machine-local. Do not treat it as project state, and do not commit generated cache files.
 
 ## JSON and schema
 
-`jbx cache list --json` returns cache entries with paths, keys, sizes, and timestamps when available. Other cache subcommands are path/mutation oriented.
+`jbx cache list --json` returns cache entries for agent inspection. Website schema: `/docs/schemas/#cache-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- `jbx cache path` points to the expected user/cache directory.
+- `jbx cache list --json` parses successfully before and after cleanup.
+- The original command succeeds after clearing only if cache corruption was the cause.
 
 ## Arguments and flags
 

@@ -25,31 +25,37 @@ jbx rewrite apply --recipe org.openrewrite.java.format.AutoFormat --source src/m
 
 ## Real-life examples
 
-### Repository maintenance
+### Preview a formatting recipe before applying it
 
-Use `rewrite` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx rewrite modules --search spring --json
+jbx rewrite recipes org.openrewrite.recipe:rewrite-testing-frameworks:3.8.0 --detail --json
+jbx rewrite patch --recipe org.openrewrite.java.format.AutoFormat --source src/main/java --json
+```
+
+Use `rewrite` for mechanical Java changes where a recipe can explain the diff better than hand edits.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-rewrite`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Discover the recipe module and recipe name with JSON commands.
+2. Run `patch` first and inspect the proposed diff.
+3. Apply only after tests/checks cover the edited area.
+4. Run `jbx fmt`, `jbx check --json`, and relevant tests afterward.
 
 ## Agent notes
 
-Default to `patch`, not `apply`. Treat `apply` as a mutating operation that needs an explicit task. After applying, run `jbx check --json` and relevant tests.
+OpenRewrite can touch many files. Keep `--source` narrow, commit recipe changes separately from hand-written behavior changes, and never apply a recipe blindly across an unknown repo.
 
 ## JSON and schema
 
-JSON modes exist for `patch`, `apply`, `modules`, and `recipes`. Schemas are summarized at `/docs/schemas/#rewrite-json`.
+`rewrite modules`, `rewrite recipes`, `rewrite patch`, and `rewrite apply` support `--json` for discovery and change reports. Website schema: `/docs/schemas/#rewrite-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Recipe/module coordinates are explicit.
+- Patch output is reviewed before apply.
+- Final diff contains expected mechanical changes only.
+- `jbx check --json` and relevant tests pass after rewriting.
 
 ## Arguments and flags
 

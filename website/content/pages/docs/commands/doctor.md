@@ -24,31 +24,35 @@ jbx doctor https://example.com/tool.java --json
 
 ## Real-life examples
 
-### Repository maintenance
+### Capture environment facts for a failing CI runner
 
-Use `doctor` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx doctor --json
+jbx doctor scripts/Report.java --json
+```
+
+Use `doctor` when the problem smells environmental: missing JDK, unwritable cache, Maven Central reachability, formatter fallback, remote trust, or native/publish tooling.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-doctor`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Run `jbx doctor --json` before changing project code.
+2. Inspect failing checks and warnings by name.
+3. Repair the environment or document the missing optional tool.
+4. Re-run the original `jbx` command after the doctor output is healthy enough.
 
 ## Agent notes
 
-Run `doctor --json` before making environment assumptions. Report failed checks and actionable fixes, not a wall of raw environment text.
+Doctor output can mention local paths and tool versions. Share summaries, not secrets or full home-directory dumps, unless the user asks.
 
 ## JSON and schema
 
-`--json` returns checks with name, status (`ok`, `warn`, `fail`, `skipped`), summary, details, and remediation hints. Website schema: `/docs/schemas/#doctor-json`.
+`jbx doctor --json` returns top-level status and named checks. Website schema: `/docs/schemas/#doctor-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Required checks pass for the task at hand.
+- Optional native/publish checks are treated as optional unless that workflow is being used.
+- The failing original command is rerun after environment repair.
 
 ## Arguments and flags
 

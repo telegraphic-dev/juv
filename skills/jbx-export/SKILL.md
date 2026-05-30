@@ -23,30 +23,35 @@ jbx export native Hello.java --output dist/hello
 
 ## Real-life examples
 
-### Repository maintenance
+### Package a script for a CI artifact
 
-Use `export` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx check Hello.java --json
+jbx export portable Hello.java --output dist/hello
+```
+
+Use `export` after compilation is already clean. It turns a script into a local jar, portable directory, or native executable for machines that should not rediscover everything at runtime.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Preflight with `jbx check <file> --json` or `jbx build <file>`.
+2. Choose `local`, `portable`, or `native` based on the deployment target.
+3. Write output under `build/` or `dist/`, not beside source files.
+4. Inspect the generated artifact and run the safest smoke command.
 
 ## Agent notes
 
-Export is a build artifact operation. Check the output path, run the produced artifact with a harmless argument, and keep native-image failures actionable rather than swallowing tool output.
+Native export depends on GraalVM/native-image and is slower. Do not choose it when a jar or portable directory satisfies the task.
 
 ## JSON and schema
 
-No `--json` mode yet. Verify produced files directly in the requested output directory.
+No `--json` mode is documented for `export`; use exit code plus generated artifact inspection.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Output path exists and contains the expected jar/directory/binary.
+- The exported artifact runs a harmless `--help` or equivalent smoke path.
+- Native export is preceded by `jbx doctor --json` when native-image availability is uncertain.
 
 ## Arguments and flags
 

@@ -24,31 +24,35 @@ jbx fetch --deps-only com.acme:app:1.0.0
 
 ## Real-life examples
 
-### Repository maintenance
+### Materialize a classpath for an external Java command
 
-Use `fetch` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx fetch --classpath org.junit.platform:junit-platform-console-standalone:1.11.4
+jbx fetch --deps-only com.fasterxml.jackson.core:jackson-databind:2.17.2
+```
+
+Use `fetch` when another tool needs jars or dependency coordinates but should not run project code.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-fetch`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Resolve the exact coordinate or dependency directive first.
+2. Fetch with `--classpath` when another process needs jar paths.
+3. Use `--deps-only` when you only need coordinates for documentation or lockstep review.
+4. Confirm the returned paths exist before invoking the external command.
 
 ## Agent notes
 
-Use `fetch` when file availability matters. Keep cache paths out of committed files and logs unless they are intentionally diagnostic.
+Fetching proves artifacts are reachable, not that the dependency graph is semantically correct. Use `resolve` when graph shape matters.
 
 ## JSON and schema
 
-No `--json` mode yet. Output is meant for shell composition: classpath strings, paths, or dependency lists.
+No `--json` mode is documented for `fetch`; use stdout shape selected by flags and verify returned paths/coordinates.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- All printed jar paths exist locally when `--classpath` is used.
+- The coordinate includes the intended version.
+- Extra repositories are explicit and reviewed before fetching from them.
 
 ## Arguments and flags
 

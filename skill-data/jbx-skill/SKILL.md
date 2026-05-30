@@ -22,30 +22,28 @@ jbx skill list --json
 
 ## Real-life examples
 
-### Repository maintenance
+### Bootstrap an agent for one command
 
-Use `skill` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx skill list --json
+```
+
+Use `skill` at the start of an automated workflow so the agent uses guidance bundled with the installed binary, not stale memory.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
-
+1. Discover available skills with `jbx skill list --json`.
+3. Follow the command-specific notes and examples.
 ## Agent notes
-
-This is the first command an agent should run. Fetch the specific command skill, follow it, then use the command page only for broader human context.
 
 ## JSON and schema
 
-`jbx skill list --json` returns installed skill names and descriptions. `skill get` returns Markdown skill content.
+`jbx skill list --json` returns bundled skill names and descriptions. Website schema: `/docs/schemas/#skill-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- The requested skill name exists in `jbx skill list --json`.
+- The fetched skill matches the installed jbx version used by the workflow.
 
 ## Arguments and flags
 

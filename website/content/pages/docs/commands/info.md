@@ -25,31 +25,36 @@ jbx info directives Hello.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Inspect directives before changing a script
 
-Use `info` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx info directives Hello.java
+jbx info deps Hello.java
+jbx info java Hello.java
+```
+
+Use `info` to read what a script declares before editing it: dependencies, repositories, Java version, docs metadata, and runtime directives.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-info`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Run `jbx info directives <file>` before modifying directives.
+2. Query focused views such as `deps`, `repos`, or `java`.
+3. Patch only the relevant directive lines.
+4. Re-run `info` plus `jbx check --json` to verify the script still resolves.
 
 ## Agent notes
 
-Prefer `info` over ad-hoc parsing of `//` directives. If multiple facts are needed, call the specific subcommands and keep each output scoped.
+Directive order and comments can carry human meaning. Preserve nearby comments unless the change intentionally removes the directive.
 
 ## JSON and schema
 
-No global `--json` mode yet; subcommands return focused text values. Use it for deterministic extraction instead of regexing source.
+No `--json` mode is documented for `info`; use focused subcommands and exact stdout.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- The queried directive value matches the source file after edits.
+- Added dependencies resolve with `jbx check --json` or `jbx build`.
+- Repository and Java-version changes are intentional and visible in diff.
 
 ## Arguments and flags
 

@@ -24,31 +24,36 @@ jbx trust remove https://example.com/tool.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Pin a reviewed remote script
 
-Use `trust` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx trust list
+jbx trust add https://example.com/tool.java
+jbx trust list
+```
+
+Use `trust` when automation must run a remote script repeatedly and the source has been reviewed.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-trust`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. List current trust entries before adding or removing anything.
+2. Review the remote script content outside the trust command.
+3. Add or remove exactly one URL/hash entry.
+4. Re-list and then run the remote script only if execution is approved.
 
 ## Agent notes
 
-Remote trust changes are security-sensitive. Ask before adding/removing trust unless the user explicitly requested it, and always show the URL/hash being trusted.
+Trust changes are security changes. Do not add trust for convenience when a local checked-in script would be safer.
 
 ## JSON and schema
 
-No `--json` mode yet. Trust operations are small and human-auditable; use explicit subcommands and verify the listed hash after changes.
+No `--json` mode is documented for `trust`; use list output plus the remote URL/hash being changed.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Trust list contains the expected URL/hash after the change.
+- Removed entries no longer appear.
+- Remote script content was reviewed before trust was granted.
 
 ## Arguments and flags
 

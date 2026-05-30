@@ -24,30 +24,35 @@ jbx check src test --warnings-as-errors --json
 
 ## Real-life examples
 
-### Repository maintenance
+### Gate an agent edit before tests
 
-Use `check` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx check src/main/java --json
+jbx check src test --warnings-as-errors --json
+```
+
+Use `check` immediately after editing Java. It catches compiler, lint, and Error Prone diagnostics before a slower test run burns time.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Run `jbx check <changed paths> --json`.
+2. Parse diagnostics by file, line, severity, and message.
+3. Patch the smallest source region that explains the diagnostic.
+4. Re-run the same check until JSON reports no blocking diagnostics.
 
 ## Agent notes
 
-Use this as the first quality gate after edits. JSON diagnostics are the contract; make fixes from structured file/line/column fields, then rerun until the status is clean or only accepted warnings remain.
+Keep the checked path narrow while repairing, then widen to `src test` before reporting. Do not scrape human diagnostics when `--json` is available.
 
 ## JSON and schema
 
-`--json` returns command status and diagnostics with file, line, column, severity, tool, code/message, and suggested next action. Website schema: `/docs/schemas/#check-json`.
+`jbx check --json` returns structured diagnostics and command status. Website schema: `/docs/schemas/#check-json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- JSON parses and includes the expected checked files.
+- No `error` diagnostics remain before running executable code.
+- `--warnings-as-errors` is used when the repository treats warnings as CI failures.
 
 ## Arguments and flags
 

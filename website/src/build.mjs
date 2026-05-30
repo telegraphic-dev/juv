@@ -90,6 +90,7 @@ function markdownToHtml(markdown, { headingPrefix = '' } = {}) {
   let codeLang = '';
   let code = [];
   let list = [];
+  let listTag = 'ul';
   let paragraph = [];
   const seenHeadingIds = new Map();
 
@@ -100,8 +101,9 @@ function markdownToHtml(markdown, { headingPrefix = '' } = {}) {
   };
   const flushList = () => {
     if (!list.length) return;
-    html.push(`<ul>${list.map(item => `<li>${inline(item)}</li>`).join('')}</ul>`);
+    html.push(`<${listTag}>${list.map(item => `<li>${inline(item)}</li>`).join('')}</${listTag}>`);
     list = [];
+    listTag = 'ul';
   };
   const flushCode = () => {
     html.push(`<pre><code class="language-${escapeHtml(codeLang)}">${escapeHtml(code.join('\n'))}</code></pre>`);
@@ -134,7 +136,21 @@ function markdownToHtml(markdown, { headingPrefix = '' } = {}) {
       continue;
     }
     const bullet = line.match(/^[-*]\s+(.+)$/);
-    if (bullet) { flushParagraph(); list.push(bullet[1]); continue; }
+    if (bullet) {
+      flushParagraph();
+      if (listTag !== 'ul') flushList();
+      listTag = 'ul';
+      list.push(bullet[1]);
+      continue;
+    }
+    const numbered = line.match(/^\d+[.)]\s+(.+)$/);
+    if (numbered) {
+      flushParagraph();
+      if (listTag !== 'ol') flushList();
+      listTag = 'ol';
+      list.push(numbered[1]);
+      continue;
+    }
     flushList();
     paragraph.push(line.trim());
   }

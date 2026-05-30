@@ -24,31 +24,35 @@ jbx resolve --classpath com.acme:app:1.0.0
 
 ## Real-life examples
 
-### Repository maintenance
+### Review dependency graph before adding `//DEPS`
 
-Use `resolve` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx resolve com.fasterxml.jackson.core:jackson-databind:2.17.2
+jbx resolve --classpath com.acme:app:1.0.0
+```
+
+Use `resolve` to understand Maven coordinates and classpaths without executing code.
 
 ### Agent loop
 
-1. Discover guidance with `jbx skill get jbx-resolve`.
-2. Run the command in the narrowest scope that answers the task.
-3. Prefer JSON/structured output when this command exposes it.
-4. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Resolve the exact candidate coordinate before editing source directives.
+2. Check classpath output when a launcher/compiler needs jar paths.
+3. Review version mediation and repository warnings.
+4. Only then add or change `//DEPS` and run `jbx check --json`.
 
 ## Agent notes
 
-Use `resolve` for metadata questions. It should not be treated as proof that jars are already present locally; use `fetch` for that.
+Resolution can involve configured repositories. Treat new repositories as supply-chain changes, not harmless flags.
 
 ## JSON and schema
 
-No `--json` mode yet. Output is dependency coordinates or classpath-style text depending on flags. Use `fetch` when artifacts must be downloaded.
+No `--json` mode is documented for `resolve`; use deterministic stdout and follow-up compile checks.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Coordinate resolves to the intended version.
+- Classpath output paths exist when `--classpath` is used.
+- Dependency changes are reflected in source directives or descriptor files and pass `jbx check --json`.
 
 ## Arguments and flags
 

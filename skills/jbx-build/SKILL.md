@@ -23,30 +23,35 @@ jbx build --java 25 Hello.java
 
 ## Real-life examples
 
-### Repository maintenance
+### Preflight a generated script before running it
 
-Use `build` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx build generated/Report.java
+jbx check generated/Report.java --json
+```
+
+Use `build` when execution would be unsafe or noisy but compilation must be proven: generated code, release helpers, migration scripts, or examples copied into docs.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Read dependencies and Java version with `jbx info directives <file>`.
+2. Compile the smallest target with `jbx build <file>`.
+3. If it fails, fix compile errors before trying `jbx run`.
+4. For warning detail, follow with `jbx check <file> --json`.
 
 ## Agent notes
 
-Prefer `build` over `run` when the task is “can this script compile?” rather than “execute this script”. Parse the process exit code; do not scrape localized compiler prose when `check --json` would fit better.
+`build` proves resolution and compilation, not behavior. It is the safe gate before `run` for scripts with network, file, or deployment side effects.
 
 ## JSON and schema
 
-No `--json` mode yet. Success/failure is the exit code and compiler diagnostics are printed for humans. Use `jbx check --json` when an agent needs structured diagnostics.
+No `--json` mode is documented for `build`; use exit code and stderr/stdout. For structured diagnostics, run `jbx check --json`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- Exit code is zero for the exact source file or directory being gated.
+- Dependency resolution output does not point at unexpected repositories.
+- The next command (`run`, `test`, or `export`) uses the same file and Java version assumptions.
 
 ## Arguments and flags
 

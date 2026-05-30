@@ -33,7 +33,7 @@ Use an explicit `--` only when the Java program needs to receive a literal doubl
 ```bash
 gh repo clone glaforge/nanocode
 cd nanocode
-export GEMINI_API_KEY="***"
+export GOOGLE_AI_GEMINI_API_KEY="***"
 jbx nanocode_basic.java
 ```
 
@@ -57,24 +57,25 @@ jbx com.h2database:h2
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Inspect the target with `jbx info directives <script>` or `jbx search <artifact> --json`.
+2. Preflight source with `jbx check --json` or `jbx build` when execution has side effects.
+3. Run with program arguments after the script/artifact target, without adding `--` unless the program needs a literal double dash.
+3. Verify outputs, generated files, or service readiness directly.
 
 ## Agent notes
 
-Treat `run` as the boundary where arbitrary user code executes. For autonomous loops, first inspect with `info`, compile with `build`, or validate with `check --json`; only run after the command and arguments are understood.
+`run` executes arbitrary user code. Prefer `info`, `build`, `check --json`, or `doctor --json` first when the command source, dependencies, or environment are not understood.
 
 ## JSON and schema
 
-No `--json` mode: stdout/stderr belong to the program being run. Use `jbx check --json`, `jbx build`, `jbx info ...`, or `jbx doctor --json` for machine-readable preflight facts before execution.
+No `--json` mode: stdout/stderr belong to the program being run. Use `jbx check --json`, `jbx info ...`, `jbx search --json`, or `jbx doctor --json` for machine-readable preflight facts before execution.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- The target script or artifact coordinate is the intended one.
+- Source targets compile before execution when safety matters.
+- Program arguments are passed after the target and are visible to the Java program.
+- Generated files, network listeners, or exit codes are checked with a second command.
 
 ## Arguments and flags
 

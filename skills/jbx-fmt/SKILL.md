@@ -23,30 +23,35 @@ jbx fmt --check src test
 
 ## Real-life examples
 
-### Repository maintenance
+### Format generated Java before committing
 
-Use `fmt` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+```bash
+jbx fmt generated/Report.java
+jbx fmt --check src test
+```
+
+Use `fmt` after code generation, OpenRewrite, or AST import so review diffs are about behavior, not whitespace.
 
 ### Agent loop
 
-1. Run the command in the narrowest scope that answers the task.
-2. Prefer JSON/structured output when this command exposes it.
-3. Verify the claimed result with files, exit codes, or the next quality gate.
+1. Run `jbx fmt --check <paths>` to see whether formatting is needed.
+2. Run `jbx fmt <paths>` only on files in scope.
+3. Inspect `git diff` for unintended semantic movement.
+4. Re-run `jbx fmt --check <paths>` before committing.
 
 ## Agent notes
 
-Formatting mutates files unless check mode is used. Inspect the diff afterwards and do not combine formatting noise with semantic edits unless requested.
+Formatting can touch many files. Keep paths narrow during repair and avoid formatting unrelated source trees in the same PR.
 
 ## JSON and schema
 
-No `--json` mode yet. Formatting is verified by clean diff or a check-mode exit code when available.
+No `--json` mode is documented for `fmt`; use exit code and `git diff`.
 
 ## Verification checklist
 
-- Confirm the command exit code matches the intended gate.
-- For mutating commands, inspect `git diff` or the generated artifact path.
-- For JSON modes, parse the output instead of scraping the human form.
-- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
+- `jbx fmt --check <paths>` exits zero after formatting.
+- Diff contains formatting-only changes for intended files.
+- Follow-up `jbx check --json` still passes for edited Java.
 
 ## Arguments and flags
 
