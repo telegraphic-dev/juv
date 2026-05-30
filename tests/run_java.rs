@@ -171,6 +171,55 @@ class Main {
 }
 
 #[test]
+fn compiles_nested_sources_declared_by_companion_sources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let main = tmp.path().join("Main.java");
+    let helper = tmp.path().join("Helper.java");
+    let nested = tmp.path().join("Nested.java");
+    fs::write(
+        &nested,
+        r#"
+class Nested {
+  static String message() { return "from nested"; }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &helper,
+        r#"
+//SOURCES Nested.java
+class Helper {
+  static String message() { return Nested.message(); }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &main,
+        r#"
+//SOURCES Helper.java
+class Main {
+  public static void main(String[] args) {
+    System.out.println(Helper.message());
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = run_jbx(&[std::path::Path::new("run"), &main], &[]);
+
+    assert!(
+        out.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "from nested");
+}
+
+#[test]
 fn treats_non_coordinate_deps_as_source_dependencies() {
     let tmp = tempfile::tempdir().unwrap();
     let main = tmp.path().join("Main.java");

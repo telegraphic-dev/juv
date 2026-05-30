@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -1646,6 +1646,70 @@ fn remote_file_name(url: &str) -> String {
     }
 }
 
+fn dedupe_strings(values: &mut Vec<String>) {
+    let mut seen = HashSet::new();
+    values.retain(|value| seen.insert(value.clone()));
+}
+
+fn dedupe_key_values(values: &mut Vec<KeyValue>) {
+    let mut seen = HashSet::new();
+    values.retain(|value| seen.insert((value.key.clone(), value.value.clone())));
+}
+
+fn collect_declared_source_directives(
+    base_dir: &Path,
+    source_refs: impl IntoIterator<Item = String>,
+) -> Result<(Vec<PathBuf>, Directives)> {
+    let mut directives = Directives::default();
+    let mut sources = Vec::new();
+    let mut queue = VecDeque::new();
+    let mut visited = HashSet::new();
+    for source_ref in source_refs {
+        queue.push_back(base_dir.join(source_ref));
+    }
+    while let Some(source_path) = queue.pop_front() {
+        let key = source_path
+            .canonicalize()
+            .unwrap_or_else(|_| source_path.clone());
+        if !visited.insert(key) {
+            continue;
+        }
+        let source = fs::read_to_string(&source_path)
+            .with_context(|| format!("failed to read source {}", source_path.display()))?;
+        let parsed = parse_directives(&source);
+        let source_dir = source_path.parent().unwrap_or(base_dir);
+        for nested in parsed.sources.iter().cloned().chain(
+            parsed
+                .deps
+                .iter()
+                .filter(|dep| !looks_like_binary_dependency(dep))
+                .cloned(),
+        ) {
+            queue.push_back(source_dir.join(nested));
+        }
+        directives.deps.extend(parsed.deps);
+        directives.repos.extend(parsed.repos);
+        directives.javac_options.extend(parsed.javac_options);
+        directives.runtime_options.extend(parsed.runtime_options);
+        directives.native_options.extend(parsed.native_options);
+        directives.java_agents.extend(parsed.java_agents);
+        directives.files.extend(parsed.files);
+        directives.sources.extend(parsed.sources);
+        sources.push(source_path);
+    }
+    sources.sort();
+    sources.dedup();
+    dedupe_strings(&mut directives.deps);
+    dedupe_strings(&mut directives.repos);
+    dedupe_strings(&mut directives.javac_options);
+    dedupe_strings(&mut directives.runtime_options);
+    dedupe_strings(&mut directives.native_options);
+    dedupe_key_values(&mut directives.java_agents);
+    dedupe_strings(&mut directives.files);
+    dedupe_strings(&mut directives.sources);
+    Ok((sources, directives))
+}
+
 pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     let materialized = materialize_script(
         &options.script,
@@ -1678,15 +1742,47 @@ pub fn build_java(options: BuildOptions) -> Result<BuildOutput> {
     fs::create_dir_all(&classes_dir)?;
 
     let base_dir = script.parent().unwrap_or_else(|| Path::new("."));
-    let (binary_deps, source_deps): (Vec<_>, Vec<_>) = directives
+    let seed_source_refs = directives.sources.iter().cloned().chain(
+        directives
+            .deps
+            .iter()
+            .filter(|dep| !looks_like_binary_dependency(dep))
+            .cloned(),
+    );
+    let (declared_sources, companion_directives) =
+        collect_declared_source_directives(base_dir, seed_source_refs)?;
+    directives.deps.extend(companion_directives.deps);
+    directives.repos.extend(companion_directives.repos);
+    directives
+        .javac_options
+        .extend(companion_directives.javac_options);
+    directives
+        .runtime_options
+        .extend(companion_directives.runtime_options);
+    directives
+        .native_options
+        .extend(companion_directives.native_options);
+    directives
+        .java_agents
+        .extend(companion_directives.java_agents);
+    directives.files.extend(companion_directives.files);
+    directives.sources.extend(companion_directives.sources);
+    dedupe_strings(&mut directives.deps);
+    dedupe_strings(&mut directives.repos);
+    dedupe_strings(&mut directives.javac_options);
+    dedupe_strings(&mut directives.runtime_options);
+    dedupe_strings(&mut directives.native_options);
+    dedupe_key_values(&mut directives.java_agents);
+    dedupe_strings(&mut directives.files);
+    dedupe_strings(&mut directives.sources);
+
+    let (binary_deps, _source_deps): (Vec<_>, Vec<_>) = directives
         .deps
         .iter()
         .cloned()
         .partition(|dep| looks_like_binary_dependency(dep));
     let mut sources = vec![script.clone()];
-    for extra in directives.sources.iter().chain(source_deps.iter()) {
-        sources.push(base_dir.join(extra));
-    }
+    sources.extend(declared_sources);
 
     let dep_cp = resolve_dependencies(&binary_deps, &directives.repos, &work_dir)?;
     let mut cp_entries = options.classpath;

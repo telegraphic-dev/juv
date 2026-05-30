@@ -6821,9 +6821,7 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
     let root = cache_root(cmd.cache_dir.as_deref())?.join("check");
 
     let binary_deps = directives.deps;
-    let mut declared_sources = inputs.declared_sources;
-    declared_sources.sort();
-    declared_sources.dedup();
+    let declared_sources = inputs.declared_sources;
 
     let repos = maven_tool::maven_repositories(&directives.repos);
     let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
@@ -6887,8 +6885,6 @@ fn run_check(cmd: CheckCommand) -> Result<i32> {
         compiler_options.push("-Werror".to_string());
     }
 
-    let repos = maven_tool::maven_repositories(&directives.repos);
-    let cache_dir = cache_root(cmd.cache_dir.as_deref())?.join("deps");
     let mut wrapper_classpath = jbx::resolver::resolve_classpath(
         &[JBX_CHECK_COMPILER_COORDINATE.to_string()],
         &repos,
