@@ -7,21 +7,48 @@ description: List and print version-matched bundled agent skills.
 
 List and print version-matched bundled agent skills.
 
-## Common use
+## When to use it
+
+- Bootstrap an agent with command-specific guidance before touching a Java repo.
+- Discover whether the installed jbx release knows a command or workflow.
+- Keep offline automation aligned with the exact binary version, not a stale website page.
+
+## Common workflows
 
 ```bash
 jbx skill list
 jbx skill list --json
 jbx skill get jbx-check
+jbx skill get jbx
 ```
+
+## Real-life examples
+
+### Repository maintenance
+
+Use `skill` as part of a repeatable repository workflow rather than a one-off shell trick. Start from the smallest safe command, inspect its output, then widen the scope only after the result is clear.
+
+### Agent loop
+
+1. Discover guidance with `jbx skill get jbx-skill`.
+2. Run the command in the narrowest scope that answers the task.
+3. Prefer JSON/structured output when this command exposes it.
+4. Verify the claimed result with files, exit codes, or the next quality gate.
 
 ## Agent notes
 
-Use this before automating jbx. Each command has a dedicated skill named `jbx-<command>`.
+This is the first command an agent should run. Fetch the specific command skill, follow it, then use the command page only for broader human context.
 
 ## JSON and schema
 
-`skill list --json` returns bundled skill names and descriptions.
+`jbx skill list --json` returns installed skill names and descriptions. `skill get` returns Markdown skill content.
+
+## Verification checklist
+
+- Confirm the command exit code matches the intended gate.
+- For mutating commands, inspect `git diff` or the generated artifact path.
+- For JSON modes, parse the output instead of scraping the human form.
+- For dependency/JDK/network behavior, run `jbx doctor --json` when the environment is suspect.
 
 ## Skill
 

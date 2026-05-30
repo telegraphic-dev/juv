@@ -4,6 +4,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 git diff --check
+generator_diff_before="$(mktemp)"
+generator_diff_after="$(mktemp)"
+trap 'rm -f "$generator_diff_before" "$generator_diff_after"' EXIT
+git diff --binary -- website/content/pages/docs/commands skill-data skills > "$generator_diff_before"
+python3 scripts/generate-agent-docs.py
+git diff --binary -- website/content/pages/docs/commands skill-data skills > "$generator_diff_after"
+if ! cmp -s "$generator_diff_before" "$generator_diff_after"; then
+  printf 'Generated command docs/skills are out of date. Run scripts/generate-agent-docs.py and commit the result.\n' >&2
+  git diff --stat -- website/content/pages/docs/commands skill-data skills >&2
+  exit 1
+fi
 npm --prefix website run check
 npm --prefix website run build
 
