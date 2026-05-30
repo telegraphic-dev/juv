@@ -287,6 +287,40 @@ class Helper {
 }
 
 #[test]
+fn check_self_referential_source_directive_terminates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    let source = tmp.path().join("SelfRef.java");
+    fs::write(
+        &source,
+        r#"
+//SOURCES ./SelfRef.java
+class SelfRef {
+  String message() { return "ok"; }
+}
+"#,
+    )
+    .unwrap();
+
+    let out = juv_command()
+        .arg("check")
+        .arg("--java")
+        .arg("21")
+        .arg("--no-error-prone")
+        .arg("--json")
+        .arg("--cache-dir")
+        .arg(&cache)
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let payload: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(payload["ok"], true, "{stdout}");
+}
+
+#[test]
 fn check_defaults_to_current_directory_and_reports_error_prone() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = tmp.path().join("cache");

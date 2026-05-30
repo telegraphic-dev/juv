@@ -6694,13 +6694,16 @@ fn collect_check_directives(files: &[PathBuf]) -> Result<CheckInputs> {
     let mut visited = BTreeSet::new();
     let mut queue: Vec<PathBuf> = files.to_vec();
     while let Some(file) = queue.pop() {
-        if !visited.insert(file.clone()) {
+        let canonical_file = file
+            .canonicalize()
+            .with_context(|| format!("failed to resolve Java source {}", file.display()))?;
+        if !visited.insert(canonical_file.clone()) {
             continue;
         }
-        let source = fs::read_to_string(&file)
-            .with_context(|| format!("failed to read Java source {}", file.display()))?;
+        let source = fs::read_to_string(&canonical_file)
+            .with_context(|| format!("failed to read Java source {}", canonical_file.display()))?;
         let parsed = jbx::parse_directives(&source);
-        let base_dir = file.parent().unwrap_or_else(|| Path::new("."));
+        let base_dir = canonical_file.parent().unwrap_or_else(|| Path::new("."));
         for source in &parsed.sources {
             let source_path = base_dir.join(source);
             declared_sources.push(source_path.clone());
