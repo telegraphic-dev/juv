@@ -20,8 +20,8 @@ The Java ecosystem is rich. So rich that one can get easily lost. `jbx` (pronoun
     <button class="copy-command" type="button" data-copy-command="curl -fsSL https://jbx.telegraphic.dev/install.sh | bash">Copy</button>
   </div>
   <div class="install-command-box" id="install-agents" role="tabpanel" aria-labelledby="tab-agents" data-install-panel="agents" hidden>
-    <pre class="install-command"><code>$ jbx skill list</code></pre>
-    <button class="copy-command" type="button" data-copy-command="jbx skill list">Copy</button>
+    <pre class="install-command"><code>$ npx skills add telegraphic-dev/jbx</code></pre>
+    <button class="copy-command" type="button" data-copy-command="npx skills add telegraphic-dev/jbx">Copy</button>
   </div>
 </div>
 
@@ -40,7 +40,7 @@ jbx org.openapitools:openapi-generator-cli
 
   <article class="card feature-card">
     <h2>For agents</h2>
-    <p><code>jbx</code> provides the pieces agents need to write Java effectively and verify their work without guessing. Ask the installed binary for version-matched skills with <code>jbx skill list</code>.</p>
+    <p><code>jbx</code> provides the pieces agents need to write Java effectively and verify their work without guessing.</p>
 
 ```bash
 jbx skill list
