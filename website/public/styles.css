@@ -258,10 +258,10 @@ footer span:last-child { display: flex; flex-wrap: nowrap; gap: 8px; justify-con
   .footer-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .footer-icon { display: block; width: 21px; height: 21px; font-size: .72rem; font-weight: 900; letter-spacing: -.04em; line-height: 21px; text-align: center; }
   .footer-github .footer-icon { width: 22px; height: 22px; }
-  .docs-with-toc { display: flex; flex-direction: column; }
-  .commands-reference { width: 100%; max-width: 100%; overflow: hidden; }
+  .docs-with-toc { display: flex; flex-direction: column; gap: 0; }
+  .commands-reference { width: 100%; max-width: 100%; overflow: hidden; padding-top: 18px; }
   .commands-reference p, .commands-reference li { max-width: 30ch; }
-  .toc { order: -1; position: static; max-height: none; margin: 0 0 26px; width: 100%; }
+  .toc { order: -1; position: static; max-height: none; margin: 0 0 16px; width: 100%; }
   .toc summary { display: flex; align-items: center; justify-content: space-between; margin: 0; }
   .toc summary::after { content: "+"; color: var(--soft); font-weight: 700; }
   .toc details[open] summary { margin-bottom: 12px; }
