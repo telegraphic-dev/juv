@@ -245,6 +245,16 @@ fn test_coverage_json_includes_report_paths() {
             > 0,
         "coverage counters should include covered lines: {json:#}"
     );
+    assert_eq!(json["coverage"]["jacocoXml"]["name"], "report");
+    let jacoco_json = json["coverage"]["jacocoXml"].to_string();
+    assert!(
+        jacoco_json.contains("CalculatorTest"),
+        "converted JaCoCo XML should include covered classes: {jacoco_json}"
+    );
+    assert!(
+        jacoco_json.contains("\"counter\""),
+        "converted JaCoCo XML should include XML counter nodes: {jacoco_json}"
+    );
     assert_non_empty_file(&tmp.path().join("target/site/jacoco/index.html"));
 }
 

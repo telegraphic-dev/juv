@@ -6942,17 +6942,18 @@ fn write_jacoco_report(
         "htmlReport": JACOCO_HTML_REPORT,
         "xmlReport": JACOCO_XML_REPORT,
     });
-    coverage["counters"] = jacoco_counters_to_json(xml_report)?;
+    let jacoco_xml = fs::read_to_string(xml_report)?;
+    coverage["counters"] = jacoco_counters_to_json(&jacoco_xml)?;
+    coverage["jacocoXml"] = xml_to_json_tree(&jacoco_xml)?;
     Ok(coverage)
 }
 
-fn jacoco_counters_to_json(xml_report: &Path) -> Result<serde_json::Value> {
-    let xml = fs::read_to_string(xml_report)?;
+fn jacoco_counters_to_json(xml: &str) -> Result<serde_json::Value> {
     let counter_re = regex::Regex::new(
         r#"<counter\s+type=\"([^\"]+)\"\s+missed=\"(\d+)\"\s+covered=\"(\d+)\"\s*/>"#,
     )?;
     let mut counters = serde_json::Map::new();
-    for captures in counter_re.captures_iter(&xml) {
+    for captures in counter_re.captures_iter(xml) {
         let counter_type = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
         let missed = captures
             .get(2)
@@ -6972,6 +6973,119 @@ fn jacoco_counters_to_json(xml_report: &Path) -> Result<serde_json::Value> {
         );
     }
     Ok(serde_json::Value::Object(counters))
+}
+
+#[derive(Debug)]
+struct XmlJsonNode {
+    name: String,
+    attributes: serde_json::Map<String, serde_json::Value>,
+    children: Vec<serde_json::Value>,
+    text: String,
+}
+
+impl XmlJsonNode {
+    fn new(name: String, attributes: serde_json::Map<String, serde_json::Value>) -> Self {
+        Self {
+            name,
+            attributes,
+            children: Vec::new(),
+            text: String::new(),
+        }
+    }
+
+    fn into_value(self) -> serde_json::Value {
+        let mut object = serde_json::Map::new();
+        object.insert("name".to_string(), serde_json::Value::String(self.name));
+        if !self.attributes.is_empty() {
+            object.insert(
+                "attributes".to_string(),
+                serde_json::Value::Object(self.attributes),
+            );
+        }
+        let text = self.text.trim();
+        if !text.is_empty() {
+            object.insert(
+                "text".to_string(),
+                serde_json::Value::String(text.to_string()),
+            );
+        }
+        if !self.children.is_empty() {
+            object.insert(
+                "children".to_string(),
+                serde_json::Value::Array(self.children),
+            );
+        }
+        serde_json::Value::Object(object)
+    }
+}
+
+fn xml_to_json_tree(xml: &str) -> Result<serde_json::Value> {
+    use quick_xml::events::{BytesStart, Event};
+    use quick_xml::Reader;
+
+    fn node_from_start(start: &BytesStart<'_>) -> XmlJsonNode {
+        let name = String::from_utf8_lossy(start.name().as_ref()).to_string();
+        let mut attributes = serde_json::Map::new();
+        for attr in start.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+            let value = String::from_utf8_lossy(attr.value.as_ref()).to_string();
+            attributes.insert(key, serde_json::Value::String(value));
+        }
+        XmlJsonNode::new(name, attributes)
+    }
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut stack: Vec<XmlJsonNode> = Vec::new();
+    let mut root = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(start)) => stack.push(node_from_start(&start)),
+            Ok(Event::Empty(start)) => {
+                let node = node_from_start(&start).into_value();
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    root = Some(node);
+                }
+            }
+            Ok(Event::Text(text)) => {
+                if let Some(current) = stack.last_mut() {
+                    let value = String::from_utf8_lossy(text.as_ref());
+                    if !value.trim().is_empty() {
+                        current.text.push_str(&value);
+                    }
+                }
+            }
+            Ok(Event::CData(text)) => {
+                if let Some(current) = stack.last_mut() {
+                    let value = String::from_utf8_lossy(text.as_ref());
+                    if !value.trim().is_empty() {
+                        current.text.push_str(&value);
+                    }
+                }
+            }
+            Ok(Event::End(_)) => {
+                let node = stack
+                    .pop()
+                    .ok_or_else(|| anyhow::anyhow!("unexpected closing XML element"))?
+                    .into_value();
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    root = Some(node);
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => anyhow::bail!("failed to parse XML report: {err}"),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    root.ok_or_else(|| anyhow::anyhow!("XML report did not contain a root element"))
 }
 
 fn junit_reports_dir() -> Result<PathBuf> {
