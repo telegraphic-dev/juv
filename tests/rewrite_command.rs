@@ -321,6 +321,8 @@ fn rewrite_modules_lists_and_searches_standard_modules() {
         .arg("org.openrewrite")
         .arg("--limit")
         .arg("1")
+        .arg("--rewrite-version")
+        .arg("8.60.0")
         .arg("--json")
         .env("JBX_MAVEN_SEARCH_URL", serve_rewrite_modules_response())
         .output()
@@ -329,7 +331,10 @@ fn rewrite_modules_lists_and_searches_standard_modules() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("\"short\": \"maven\""), "{stdout}");
-    assert!(stdout.contains("org.openrewrite:rewrite-maven"), "{stdout}");
+    assert!(
+        stdout.contains("org.openrewrite:rewrite-maven:8.60.0"),
+        "{stdout}"
+    );
 }
 
 #[test]

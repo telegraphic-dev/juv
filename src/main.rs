@@ -4393,7 +4393,9 @@ fn search_rewrite_modules(cmd: &RewriteModulesCommand) -> Result<Vec<RewriteModu
             .into_iter()
             .flatten()
         {
-            if let Some(module) = rewrite_module_from_search_doc(doc, cmd.search.as_deref()) {
+            if let Some(module) =
+                rewrite_module_from_search_doc(doc, cmd.search.as_deref(), &cmd.rewrite_version)
+            {
                 modules.push(module);
             }
         }
@@ -4417,6 +4419,7 @@ fn rewrite_module_search_query(group: &str, search: Option<&str>) -> String {
 fn rewrite_module_from_search_doc(
     doc: &serde_json::Value,
     search: Option<&str>,
+    requested_version: &str,
 ) -> Option<RewriteModuleInfo> {
     let group = doc.get("g")?.as_str()?;
     let artifact = doc.get("a")?.as_str()?;
@@ -4431,11 +4434,14 @@ fn rewrite_module_from_search_doc(
             return None;
         }
     }
-    let version = doc
-        .get("latestVersion")
-        .or_else(|| doc.get("v"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
+    let version = if requested_version.trim().is_empty() {
+        doc.get("latestVersion")
+            .or_else(|| doc.get("v"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+    } else {
+        requested_version.trim()
+    };
     if version.is_empty() {
         return None;
     }
