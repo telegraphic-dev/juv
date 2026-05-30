@@ -24,7 +24,7 @@ Valid `generatedFrom.source` values include:
 - `manual` — written by a maintainer.
 - `mixed` — combines multiple documented sources; entries should carry their own source metadata where practical.
 
-Agent guidance is only valid when it is explicitly present in the source material, for example a `//DOCS agent-note=...` directive or a maintainer-written sidecar section. Generated docs must not hallucinate best practices from library reputation.
+Usage guidance is only valid when it is explicitly present in the source material, for example a `//DOCS note=...` directive or a maintainer-written sidecar section. Generated docs must not hallucinate best practices from library reputation.
 
 ## Naming
 

@@ -87,7 +87,7 @@ Implemented now:
   - `//NOINTEGRATIONS`
 - compile/run cache under the OS cache directory
 - `jbx build` compiles scripts into cache without running them
-- `jbx init` creates Java 25+ unnamed-class scripts from built-in or imported catalog templates (`hello`/`java`, `compact`, `cli`, `agent`, plus catalog `templates` entries), supports `--deps`, `--java`, `--template`, and `--force`
+- `jbx init` creates Java 25+ unnamed-class scripts from built-in or imported catalog templates (`hello`/`java`, `compact`, `cli`, `agent`, `test`, plus catalog `templates` entries), supports `--deps`, `--java`, `--template`, and `--force`
 - `jbx template list` lists built-in and imported catalog init templates and supports `--json`
 - `jbx cache clear` clears the compiled-script cache
 - `jbx cache path` prints the effective compiled-script cache directory
@@ -115,7 +115,7 @@ Implemented now:
 - `jbx publish --publish` uploads the signed Central bundle to the Portal API with `publishingType=AUTOMATIC` by default and polls `/api/v1/publisher/status` until it is `PUBLISHED` or `FAILED`
 - `jbx publish --serve <port>` prepares the same Maven repository layout unsigned and serves it from `http://127.0.0.1:<port>/`; port `0` asks the OS to choose a free port; it also serves artifact-level `maven-metadata.xml` plus checksums so version-less Maven lookups work
 - `jbx install` installs the current project into `~/.m2/repository` by default or another Maven-layout repository with `--destination` / `--to`; it updates `maven-metadata-local.xml` for the installed artifact
-- `jbx skill list [--json]` and `jbx skill get [name]` expose version-matched agent guidance bundled with the binary from editable `skill-data/` files; command skills are named `jbx-<command>`
+- `jbx skill list [--json]` and `jbx skill get [name]` expose version-matched agent guidance bundled with the binary. The main skill comes from `skill-data/jbx/SKILL.md`; command skills are generated from the website command Markdown in `website/content/pages/docs/commands/` and are named `jbx-<command>`.
 - `jbx docs <source|dir>` generates Markdown docs from local Java sources without writing cache entries
 - `jbx docs <group:artifact>` resolves the latest Maven release metadata before fetching `artifact-version-jbx-docs.md`
 - `jbx docs <group:artifact:version> [--json]` fetches `artifact-version-jbx-docs.md` or `.json` Maven sidecars and caches remote results under the docs cache namespace; see [`docs/jbx-docs-schema.md`](docs/jbx-docs-schema.md) for the JSON shape
