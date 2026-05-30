@@ -56,7 +56,7 @@ fn install_fake_artifact(home: &Path, group: &str, artifact: &str, version: &str
 
 fn install_fake_rewrite_helper(home: &Path) {
     install_fake_artifact(home, "org.openrewrite", "rewrite-java", "8.56.1");
-    install_fake_artifact(home, "org.openrewrite", "rewrite-java-25", "8.56.1");
+    install_fake_artifact(home, "org.openrewrite", "rewrite-java-21", "8.56.1");
     install_fake_artifact(home, "org.slf4j", "slf4j-api", "2.0.17");
     install_fake_artifact(home, "org.slf4j", "slf4j-nop", "2.0.17");
     let repo = home.join(".m2/repository/dev/telegraphic/jbx/jbx-rewrite/999-test");

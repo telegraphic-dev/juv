@@ -4279,8 +4279,7 @@ fn rewrite_java_runtime_coordinate(java_major: u32, version: &str) -> String {
         0..=8 => 8,
         9..=11 => 11,
         12..=17 => 17,
-        18..=21 => 21,
-        _ => 25,
+        _ => 21,
     };
     format!("org.openrewrite:rewrite-java-{parser_major}:{version}")
 }
@@ -4299,7 +4298,6 @@ fn rewrite_core_module_short_names() -> &'static [&'static str] {
     &[
         "java",
         "java-21",
-        "java-25",
         "xml",
         "yaml",
         "properties",
@@ -7828,7 +7826,7 @@ String value = example.readValue("{}", String.class);</pre>
         );
         assert_eq!(
             rewrite_java_runtime_coordinate(25, "8.56.1"),
-            "org.openrewrite:rewrite-java-25:8.56.1"
+            "org.openrewrite:rewrite-java-21:8.56.1"
         );
     }
 
