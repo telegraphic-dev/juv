@@ -1,6 +1,6 @@
 ---
 name: jbx
-description: Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
+description: "Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools."
 ---
 
 # `jbx`

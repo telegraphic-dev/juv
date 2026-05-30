@@ -1,6 +1,6 @@
 ---
 name: jbx-app
-description: Install, list, or uninstall Java scripts as PATH commands.
+description: "Install, list, or uninstall Java scripts as PATH commands."
 ---
 
 # `app`

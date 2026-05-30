@@ -1,6 +1,6 @@
 ---
 name: jbx-fetch
-description: Download artifacts and print classpath or dependency coordinates.
+description: "Download artifacts and print classpath or dependency coordinates."
 ---
 
 # `fetch`

@@ -1,6 +1,6 @@
 ---
 name: jbx-doctor
-description: Diagnose JDKs, Maven, caches, trust, dependencies, and optional native/publish tools.
+description: "Diagnose JDKs, Maven, caches, trust, dependencies, and optional native/publish tools."
 ---
 
 # `doctor`

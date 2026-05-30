@@ -1,6 +1,6 @@
 ---
 name: jbx-test
-description: Run JUnit tests with optional JaCoCo coverage.
+description: "Run JUnit tests with optional JaCoCo coverage."
 ---
 
 # `test`

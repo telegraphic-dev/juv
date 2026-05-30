@@ -1,6 +1,6 @@
 ---
 name: jbx-jdk
-description: List, install, and locate JDKs used by jbx.
+description: "List, install, and locate JDKs used by jbx."
 ---
 
 # `jdk`

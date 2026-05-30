@@ -1,6 +1,6 @@
 ---
 name: jbx-skill
-description: List and print version-matched bundled agent skills.
+description: "List and print version-matched bundled agent skills."
 ---
 
 # `skill`

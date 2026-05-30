@@ -13,7 +13,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 COMMAND_DIR = ROOT / "website/content/pages/docs/commands"
 SKILL_DATA_DIR = ROOT / "skill-data"
-INSTALLABLE_SKILL_DIR = ROOT / "skills/jbx"
+INSTALLABLE_SKILL_FILE = ROOT / "SKILL.md"
 
 ORDER = [
     "top-level", "run", "build", "check", "test", "docs", "doctor", "rewrite",
@@ -66,6 +66,10 @@ def skill_name(page_stem: str) -> str:
     return "jbx" if page_stem == "top-level" else f"jbx-{page_stem}"
 
 
+def yaml_quote(value: str) -> str:
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
 def skill_markdown(page_stem: str) -> str:
     page = COMMAND_DIR / f"{page_stem}.md"
     meta, body = parse_page(page)
@@ -73,13 +77,13 @@ def skill_markdown(page_stem: str) -> str:
     description = meta.get("description", "jbx command guidance")
     body = strip_section(body, "Skill")
     body = strip_skill_bootstrap(body)
-    return f"---\nname: {name}\ndescription: {description}\n---\n\n{body}".rstrip() + "\n"
+    return f"---\nname: {name}\ndescription: {yaml_quote(description)}\n---\n\n{body}".rstrip() + "\n"
 
 
 def installable_jbx_skill() -> str:
     return """---
 name: jbx
-description: Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
+description: "Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools."
 ---
 
 # jbx
@@ -209,22 +213,21 @@ def generate() -> None:
                 nested.unlink()
             elif nested.is_dir():
                 nested.rmdir()
-    if INSTALLABLE_SKILL_DIR.parent.exists():
-        for child in INSTALLABLE_SKILL_DIR.parent.iterdir():
-            if child.is_dir() and child.name != INSTALLABLE_SKILL_DIR.name:
-                for nested in sorted(child.rglob("*"), reverse=True):
-                    if nested.is_file():
-                        nested.unlink()
-                    elif nested.is_dir():
-                        nested.rmdir()
-                child.rmdir()
+    legacy_skills_dir = ROOT / "skills"
+    if legacy_skills_dir.exists():
+        for nested in sorted(legacy_skills_dir.rglob("*"), reverse=True):
+            if nested.is_file():
+                nested.unlink()
+            elif nested.is_dir():
+                nested.rmdir()
+        legacy_skills_dir.rmdir()
     for page_stem in ORDER:
         page = COMMAND_DIR / f"{page_stem}.md"
         if not page.exists():
             raise SystemExit(f"Missing command page: {page}")
         name = skill_name(page_stem)
         write(SKILL_DATA_DIR / f"{name}.md", skill_markdown(page_stem))
-    write(INSTALLABLE_SKILL_DIR / "SKILL.md", installable_jbx_skill())
+    write(INSTALLABLE_SKILL_FILE, installable_jbx_skill())
 
 
 if __name__ == "__main__":

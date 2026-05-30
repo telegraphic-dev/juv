@@ -1,6 +1,6 @@
 ---
 name: jbx-template
-description: List built-in and imported templates for `jbx init`.
+description: "List built-in and imported templates for `jbx init`."
 ---
 
 # `template`

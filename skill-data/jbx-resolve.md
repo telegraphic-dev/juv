@@ -1,6 +1,6 @@
 ---
 name: jbx-resolve
-description: Resolve Maven coordinates to dependency coordinates or classpaths.
+description: "Resolve Maven coordinates to dependency coordinates or classpaths."
 ---
 
 # `resolve`

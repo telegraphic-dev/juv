@@ -1,6 +1,6 @@
 ---
 name: jbx-rewrite
-description: Preview/apply OpenRewrite recipes and discover modules or recipes.
+description: "Preview/apply OpenRewrite recipes and discover modules or recipes."
 ---
 
 # `rewrite`

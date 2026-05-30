@@ -1,6 +1,6 @@
 ---
 name: jbx-graph
-description: Dump JavaParser native AST JSON or import it back to Java source.
+description: "Dump JavaParser native AST JSON or import it back to Java source."
 ---
 
 # `graph`

@@ -1,6 +1,6 @@
 ---
 name: jbx-fmt
-description: Format Java files with Palantir Java Format.
+description: "Format Java files with Palantir Java Format."
 ---
 
 # `fmt`

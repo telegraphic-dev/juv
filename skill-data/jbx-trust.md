@@ -1,6 +1,6 @@
 ---
 name: jbx-trust
-description: Pin, list, remove, or clear trusted hashes for remote scripts.
+description: "Pin, list, remove, or clear trusted hashes for remote scripts."
 ---
 
 # `trust`

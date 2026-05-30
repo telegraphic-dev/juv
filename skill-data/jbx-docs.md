@@ -1,6 +1,6 @@
 ---
 name: jbx-docs
-description: Generate Markdown or JSON documentation from local sources or Maven artifacts.
+description: "Generate Markdown or JSON documentation from local sources or Maven artifacts."
 ---
 
 # `docs`
