@@ -19,7 +19,7 @@ fn skill_list_prints_bundled_jbx_skill() {
     assert_success(&out);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("jbx\tSingle agent-friendly entry point to the Java ecosystem."),
+        stdout.contains("jbx\tUse jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools."),
         "{stdout}"
     );
 }

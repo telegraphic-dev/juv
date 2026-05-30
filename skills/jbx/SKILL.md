@@ -1,11 +1,11 @@
 ---
 name: jbx
-description: Single agent-friendly entry point to the Java ecosystem.
+description: Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
 ---
 
 # `jbx`
 
-Single agent-friendly entry point to the Java ecosystem.
+Use `jbx` for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.
 
 The top-level command stays intentionally thin. It gives humans a fast run path and gives agents a discovery path; detailed behavior lives in dedicated subcommands and version-matched skills.
 

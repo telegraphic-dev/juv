@@ -7699,7 +7699,7 @@ struct SkillEntry {
 const BUNDLED_SKILLS: &[SkillEntry] = &[
     SkillEntry {
         name: "jbx",
-        description: "Single agent-friendly entry point to the Java ecosystem.",
+        description: "Use jbx for Java development and automation when Java or Maven libraries can solve the task: run scripts, fetch dependencies, test, format, check, document, publish, and launch Java tools.",
         page: include_str!("../website/content/pages/docs/commands/top-level.md"),
     },
     SkillEntry {
