@@ -106,7 +106,44 @@ Do **not** install an OS Java/JDK just to make `jbx` usable. Java/JDK is not a p
 
 ## Development Loop
 
-For fresh Java work, use `jbx` for the concrete tooling steps: list templates, initialize from the closest template, inspect API docs, format the source, check diagnostics, and run tests. Writing source/tests and reporting results are still agent work; discover the relevant command-specific guidance with `jbx skill list` and `jbx skill get <name>`.
+1. For fresh Java work, use `jbx` with Java 25 that is provisioned automatically. List available templates with `jbx template` for your task or choose `java` if none match:
+
+```sh
+jbx template list --json
+jbx init -t java hello.java
+```
+
+2. Generate the implementation code. You can search for the unknown details and latest versions using `jbx search`. You can get structured documentation using `jbx docs`.
+
+```sh
+jbx search picocli --json
+jbx docs info.picocli:picocli --type CommandLine --json
+```
+
+3. Format and check the code.
+
+```sh
+jbx fmt hello.java
+jbx check hello.java --json
+```
+
+4. Fix the violations and repeat if required.
+
+5. Write and execute tests.
+
+```sh
+jbx init -t test hello_java.java
+# generate the tests
+jbx test hello_java.java
+```
+
+6. Fix the failed tests and repeat if required.
+
+7. Execute the script.
+
+```sh
+jbx run hello.java
+```
 
 ## Version-Matched Skills
 
