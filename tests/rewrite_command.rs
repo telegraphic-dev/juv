@@ -184,20 +184,38 @@ fn configure_fake_rewrite_helper(command: &mut Command, home: &Path) {
 }
 
 fn serve_rewrite_modules_response() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut request = [0_u8; 4096];
-        let _ = stream.read(&mut request).unwrap_or(0);
-        let body = r#"{
+    serve_maven_search_response(
+        r#"{
   "response": {
     "numFound": 1,
     "docs": [
       {"id":"org.openrewrite:rewrite-maven","g":"org.openrewrite","a":"rewrite-maven","latestVersion":"8.56.1","p":"jar","versionCount": 120}
     ]
   }
-}"#;
+}"#,
+    )
+}
+
+fn serve_rewrite_recipe_modules_response() -> String {
+    serve_maven_search_response(
+        r#"{
+  "response": {
+    "numFound": 1,
+    "docs": [
+      {"id":"org.openrewrite.recipe:rewrite-spring","g":"org.openrewrite.recipe","a":"rewrite-spring","latestVersion":"6.4.0","p":"jar","versionCount": 82}
+    ]
+  }
+}"#,
+    )
+}
+
+fn serve_maven_search_response(body: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request).unwrap_or(0);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(), body
@@ -335,6 +353,32 @@ fn rewrite_modules_lists_and_searches_standard_modules() {
         stdout.contains("org.openrewrite:rewrite-maven:8.60.0"),
         "{stdout}"
     );
+}
+
+#[test]
+fn rewrite_modules_uses_recipe_module_latest_version_by_default() {
+    let out = jbx_command()
+        .arg("rewrite")
+        .arg("modules")
+        .arg("--search")
+        .arg("spring")
+        .arg("--group")
+        .arg("org.openrewrite.recipe")
+        .arg("--json")
+        .env(
+            "JBX_MAVEN_SEARCH_URL",
+            serve_rewrite_recipe_modules_response(),
+        )
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("org.openrewrite.recipe:rewrite-spring:6.4.0"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(":8.56.1"), "{stdout}");
 }
 
 #[test]

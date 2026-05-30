@@ -603,8 +603,8 @@ struct RewriteModulesCommand {
     json: bool,
 
     /// OpenRewrite version used when expanding short module names.
-    #[arg(long = "rewrite-version", default_value = DEFAULT_OPENREWRITE_VERSION)]
-    rewrite_version: String,
+    #[arg(long = "rewrite-version")]
+    rewrite_version: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -4393,9 +4393,11 @@ fn search_rewrite_modules(cmd: &RewriteModulesCommand) -> Result<Vec<RewriteModu
             .into_iter()
             .flatten()
         {
-            if let Some(module) =
-                rewrite_module_from_search_doc(doc, cmd.search.as_deref(), &cmd.rewrite_version)
-            {
+            if let Some(module) = rewrite_module_from_search_doc(
+                doc,
+                cmd.search.as_deref(),
+                cmd.rewrite_version.as_deref(),
+            ) {
                 modules.push(module);
             }
         }
@@ -4419,7 +4421,7 @@ fn rewrite_module_search_query(group: &str, search: Option<&str>) -> String {
 fn rewrite_module_from_search_doc(
     doc: &serde_json::Value,
     search: Option<&str>,
-    requested_version: &str,
+    requested_version: Option<&str>,
 ) -> Option<RewriteModuleInfo> {
     let group = doc.get("g")?.as_str()?;
     let artifact = doc.get("a")?.as_str()?;
@@ -4434,14 +4436,15 @@ fn rewrite_module_from_search_doc(
             return None;
         }
     }
-    let version = if requested_version.trim().is_empty() {
-        doc.get("latestVersion")
-            .or_else(|| doc.get("v"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-    } else {
-        requested_version.trim()
-    };
+    let version = requested_version
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            doc.get("latestVersion")
+                .or_else(|| doc.get("v"))
+                .and_then(|value| value.as_str())
+        })
+        .unwrap_or("");
     if version.is_empty() {
         return None;
     }
