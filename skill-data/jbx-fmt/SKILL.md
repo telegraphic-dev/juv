@@ -43,10 +43,6 @@ Use `fmt` after code generation, OpenRewrite, or AST import so review diffs are 
 
 Formatting can touch many files. Keep paths narrow during repair and avoid formatting unrelated source trees in the same PR.
 
-## JSON and schema
-
-No `--json` mode is documented for `fmt`; use exit code and `git diff`.
-
 ## Verification checklist
 
 - `jbx fmt --check <paths>` exits zero after formatting.

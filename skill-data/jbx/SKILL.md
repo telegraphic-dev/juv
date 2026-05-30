@@ -66,10 +66,6 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 - Prefer explicit subcommands over relying on top-level shorthand in automation.
 - Treat top-level script/tool execution as code execution; inspect before running unknown inputs.
 
-## JSON and schema
-
-No top-level JSON mode. The top-level entry point forwards humans to common run paths and agents to `jbx skill`. Use dedicated JSON modes such as `jbx skill list --json`, `jbx doctor --json`, `jbx check --json`, `jbx docs --json`, `jbx search --json`, `jbx test --json`, and `jbx rewrite ... --json`.
-
 ## Arguments and flags
 
 This section is copied from the CLI help for this release so the page explains the actual accepted arguments.

@@ -45,7 +45,7 @@ Qualified names are the default:
 
 ```json
 {
-  "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+  "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
   "artifact": {
     "group": "com.fasterxml.jackson.core",
     "id": "jackson-databind",

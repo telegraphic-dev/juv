@@ -1,7 +1,7 @@
 ---
 
 title: jbx doctor command
-description: Verify local jbx installation
+description: Diagnose JDKs, Maven, caches, trust, dependencies, and optional native/publish tools.
 ---
 
 # `doctor`
@@ -46,7 +46,31 @@ Doctor output can mention local paths and tool versions. Share summaries, not se
 
 ## JSON and schema
 
-`jbx doctor --json` returns top-level status and named checks. Website schema: `/docs/schemas/#doctor-json`.
+`jbx doctor --json` returns top-level status and named checks. Example output and field notes: [`doctor JSON`](/docs/schemas/#doctor-json).
+
+Example JSON:
+
+```json
+{
+  "status": "ok",
+  "target": null,
+  "checks": [
+    {
+      "name": "jdk",
+      "status": "ok",
+      "summary": "JDK 25 selected at /home/user/.cache/jbx/jdks/25",
+      "detail": null
+    },
+    {
+      "name": "dependency-resolution",
+      "status": "skipped",
+      "summary": "no local script dependencies to resolve",
+      "detail": null
+    }
+  ]
+}
+```
+
 
 ## Verification checklist
 

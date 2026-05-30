@@ -1,7 +1,7 @@
 ---
 
 title: jbx template command
-description: List built-in and imported templates for jbx init.
+description: List built-in and imported templates for `jbx init`.
 ---
 
 # `template`
@@ -46,7 +46,23 @@ Templates encode conventions. Prefer an existing team/catalog template over inve
 
 ## JSON and schema
 
-`jbx template list --json` returns built-in and catalog template metadata. Website schema: `/docs/schemas/#template-json`.
+`jbx template list --json` returns built-in and catalog template metadata. Example output and field notes: [`template JSON`](/docs/schemas/#template-json).
+
+Example JSON:
+
+```json
+[
+  {
+    "name": "compact",
+    "description": "Java 25 compact-source Hello World script"
+  },
+  {
+    "name": "test",
+    "description": "JUnit test class"
+  }
+]
+```
+
 
 ## Verification checklist
 

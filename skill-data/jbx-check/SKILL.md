@@ -1,6 +1,6 @@
 ---
 name: jbx-check
-description: Diagnose the Java source file for errors
+description: Check Java source with structured diagnostics.
 ---
 
 # `check`
@@ -46,7 +46,17 @@ Keep the checked path narrow while repairing, then widen to `src test` before re
 
 ## JSON and schema
 
-`jbx check --json` returns structured diagnostics and command status. Website schema: `/docs/schemas/#check-json`.
+`jbx check --json` returns structured diagnostics and command status. Example output and field notes: [`check JSON`](/docs/schemas/#check-json).
+
+Example JSON:
+
+```json
+{
+  "ok": true,
+  "diagnostics": [],
+  "compilerOutput": ""
+}
+```
 
 ## Verification checklist
 

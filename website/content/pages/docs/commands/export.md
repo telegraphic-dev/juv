@@ -44,10 +44,6 @@ Use `export` after compilation is already clean. It turns a script into a local 
 
 Native export depends on GraalVM/native-image and is slower. Do not choose it when a jar or portable directory satisfies the task.
 
-## JSON and schema
-
-No `--json` mode is documented for `export`; use exit code plus generated artifact inspection.
-
 ## Verification checklist
 
 - Output path exists and contains the expected jar/directory/binary.

@@ -1,7 +1,7 @@
 ---
 
 title: jbx build command
-description: Compile Java source without running it
+description: Compile a script into the jbx cache without running it.
 ---
 
 # `build`
@@ -43,10 +43,6 @@ Use `build` when execution would be unsafe or noisy but compilation must be prov
 ## Agent notes
 
 `build` proves resolution and compilation, not behavior. It is the safe gate before `run` for scripts with network, file, or deployment side effects.
-
-## JSON and schema
-
-No `--json` mode is documented for `build`; use exit code and stderr/stdout. For structured diagnostics, run `jbx check --json`.
 
 ## Verification checklist
 

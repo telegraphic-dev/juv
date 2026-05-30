@@ -1,6 +1,6 @@
 ---
 name: jbx-resolve
-description: Resolve Maven coordinates
+description: Resolve Maven coordinates to dependency coordinates or classpaths.
 ---
 
 # `resolve`
@@ -42,10 +42,6 @@ Use `resolve` to understand Maven coordinates and classpaths without executing c
 ## Agent notes
 
 Resolution can involve configured repositories. Treat new repositories as supply-chain changes, not harmless flags.
-
-## JSON and schema
-
-No `--json` mode is documented for `resolve`; use deterministic stdout and follow-up compile checks.
 
 ## Verification checklist
 

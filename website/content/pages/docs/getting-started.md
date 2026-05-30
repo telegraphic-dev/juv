@@ -96,7 +96,7 @@ jbx rewrite recipes yaml --search format --detail --json
 
 ## Publishing metadata
 
-`jbx publish --file jbx.json --dry-run` stages Maven-ready artifacts before any real release. Keep the descriptor lean: use `dependencies` (or `//DEPS` in a script) for libraries needed to compile the artifact, and `runtimeDependencies` (or `//RUNTIME`) for runtime-only libraries such as logging backends or recipe helper providers.
+`jbx publish --file jbx.json --dry-run` stages Maven-ready artifacts before any real release. Keep the descriptor lean: use `dependencies` (or `//DEPS` in a script) for libraries needed to compile the artifact, and `runtimeDependencies` (or `//RUNTIME`) for runtime-only libraries such as logging backends or recipe helper providers. See the [`jbx.json` descriptor reference](/docs/jbx-json/) for the full field list and schema.
 
 ```json
 {

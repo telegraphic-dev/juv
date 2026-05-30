@@ -1,6 +1,6 @@
 ---
 name: jbx-search
-description: Search Maven Central artifacts
+description: Search Maven Central artifacts by text or coordinates.
 ---
 
 # `search`
@@ -45,7 +45,26 @@ Maven Central search is discovery, not endorsement. Do not pick a dependency onl
 
 ## JSON and schema
 
-`jbx search --json` returns the query, total count, and normalized artifact candidates. Website schema: `/docs/schemas/#search-json`.
+`jbx search --json` returns the query, total count, and normalized artifact candidates. Example output and field notes: [`search JSON`](/docs/schemas/#search-json).
+
+Example JSON:
+
+```json
+{
+  "query": "g:org.junit.platform AND a:junit-platform-console-standalone",
+  "numFound": 1,
+  "artifacts": [
+    {
+      "coordinate": "org.junit.platform:junit-platform-console-standalone:1.13.0-M3",
+      "groupId": "org.junit.platform",
+      "artifactId": "junit-platform-console-standalone",
+      "version": "1.13.0-M3",
+      "packaging": "jar",
+      "repositoryId": "central"
+    }
+  ]
+}
+```
 
 ## Verification checklist
 

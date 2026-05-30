@@ -1,6 +1,6 @@
 ---
 name: jbx-test
-description: Run JUnit tests
+description: Run JUnit tests with optional JaCoCo coverage.
 ---
 
 # `test`
@@ -45,7 +45,26 @@ Arguments after `--` go to the JUnit console launcher, not jbx. Keep that bounda
 
 ## JSON and schema
 
-`jbx test --json` returns test execution status, failures, and coverage metadata when requested. Website schema: `/docs/schemas/#test-json`.
+`jbx test --json` returns test execution status, failures, and coverage metadata when requested. Example output and field notes: [`test JSON`](/docs/schemas/#test-json).
+
+Example JSON:
+
+```json
+{
+  "tests": 1,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "testCases": [
+    {
+      "className": "CalculatorTest",
+      "name": "adds()",
+      "time": "0.025",
+      "status": "passed"
+    }
+  ]
+}
+```
 
 ## Verification checklist
 

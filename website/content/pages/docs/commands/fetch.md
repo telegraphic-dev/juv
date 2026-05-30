@@ -18,7 +18,7 @@ Download artifacts and print classpath or dependency coordinates.
 
 ```bash
 jbx fetch com.fasterxml.jackson.core:jackson-databind:2.17.2
-jbx fetch --classpath org.junit.platform:junit-platform-console-standalone:1.11.4
+jbx fetch org.junit.platform:junit-platform-console-standalone:1.11.4
 jbx fetch --deps-only com.acme:app:1.0.0
 ```
 
@@ -27,7 +27,7 @@ jbx fetch --deps-only com.acme:app:1.0.0
 ### Materialize a classpath for an external Java command
 
 ```bash
-jbx fetch --classpath org.junit.platform:junit-platform-console-standalone:1.11.4
+jbx fetch org.junit.platform:junit-platform-console-standalone:1.11.4
 jbx fetch --deps-only com.fasterxml.jackson.core:jackson-databind:2.17.2
 ```
 
@@ -36,7 +36,7 @@ Use `fetch` when another tool needs jars or dependency coordinates but should no
 ### Agent loop
 
 1. Resolve the exact coordinate or dependency directive first.
-2. Fetch with `--classpath` when another process needs jar paths.
+2. Fetch normally when another process needs jar paths; stdout is the classpath by default.
 3. Use `--deps-only` when you only need coordinates for documentation or lockstep review.
 4. Confirm the returned paths exist before invoking the external command.
 
@@ -44,13 +44,9 @@ Use `fetch` when another tool needs jars or dependency coordinates but should no
 
 Fetching proves artifacts are reachable, not that the dependency graph is semantically correct. Use `resolve` when graph shape matters.
 
-## JSON and schema
-
-No `--json` mode is documented for `fetch`; use stdout shape selected by flags and verify returned paths/coordinates.
-
 ## Verification checklist
 
-- All printed jar paths exist locally when `--classpath` is used.
+- All printed jar paths exist locally when classpath output is used.
 - The coordinate includes the intended version.
 - Extra repositories are explicit and reviewed before fetching from them.
 

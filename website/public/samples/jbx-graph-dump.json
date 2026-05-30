@@ -1,0 +1,48 @@
+{
+  "!": "com.github.javaparser.ast.CompilationUnit",
+  "range": {
+    "beginLine": 1,
+    "beginColumn": 1,
+    "endLine": 3,
+    "endColumn": 2
+  },
+  "tokenRange": {
+    "beginToken": {
+      "kind": 65,
+      "text": "void"
+    },
+    "endToken": {
+      "kind": 0,
+      "text": ""
+    }
+  },
+  "imports": [],
+  "types": [
+    {
+      "!": "com.github.javaparser.ast.body.ClassOrInterfaceDeclaration",
+      "isCompact": "true",
+      "isInterface": "false",
+      "members": [
+        {
+          "!": "com.github.javaparser.ast.body.MethodDeclaration",
+          "name": { "identifier": "main" },
+          "type": { "!": "com.github.javaparser.ast.type.VoidType" },
+          "body": {
+            "!": "com.github.javaparser.ast.stmt.BlockStmt",
+            "statements": [
+              {
+                "!": "com.github.javaparser.ast.stmt.ExpressionStmt",
+                "expression": {
+                  "!": "com.github.javaparser.ast.expr.MethodCallExpr",
+                  "name": { "identifier": "println" }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "module": null,
+  "packageDeclaration": null
+}

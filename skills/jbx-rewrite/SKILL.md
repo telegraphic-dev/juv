@@ -1,6 +1,6 @@
 ---
 name: jbx-rewrite
-description: Discover OpenRewrite modules and recipes and preview or apply them
+description: Preview/apply OpenRewrite recipes and discover modules or recipes.
 ---
 
 # `rewrite`
@@ -47,7 +47,22 @@ OpenRewrite can touch many files. Keep `--source` narrow, commit recipe changes 
 
 ## JSON and schema
 
-`rewrite modules`, `rewrite recipes`, `rewrite patch`, and `rewrite apply` support `--json` for discovery and change reports. Website schema: `/docs/schemas/#rewrite-json`.
+`rewrite modules`, `rewrite recipes`, `rewrite patch`, and `rewrite apply` support `--json` for discovery and change reports. Example output and field notes: [`rewrite JSON`](/docs/schemas/#rewrite-json).
+
+Example JSON:
+
+```json
+[
+  {
+    "short": "spring",
+    "coordinate": "org.openrewrite.recipe:rewrite-spring:6.9.0",
+    "groupId": "org.openrewrite.recipe",
+    "artifactId": "rewrite-spring",
+    "version": "6.9.0",
+    "versionCount": 123
+  }
+]
+```
 
 ## Verification checklist
 

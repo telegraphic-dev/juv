@@ -47,7 +47,20 @@ Cache state is machine-local. Do not treat it as project state, and do not commi
 
 ## JSON and schema
 
-`jbx cache list --json` returns cache entries for agent inspection. Website schema: `/docs/schemas/#cache-json`.
+`jbx cache list --json` returns compiled-script cache entries. Example output and field notes: [`cache JSON`](/docs/schemas/#cache-json).
+
+Example JSON:
+
+```json
+[
+  {
+    "script": "/workspace/Hello.java",
+    "classesDir": "/workspace/.jbx-cache/e2db3fcb2d67e4ce/classes",
+    "cacheDir": "/workspace/.jbx-cache/e2db3fcb2d67e4ce"
+  }
+]
+```
+
 
 ## Verification checklist
 

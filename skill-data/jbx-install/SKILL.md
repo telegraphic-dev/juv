@@ -30,7 +30,7 @@ jbx install --file jbx.json --destination build/local-m2
 jbx resolve --repo local=build/local-m2 com.acme:tool:1.0.0
 ```
 
-Use `install` to test Maven metadata and local consumption before publishing or wiring another script to the artifact.
+Use `install` to test Maven metadata and local consumption before publishing or wiring another script to the artifact. The descriptor fields are documented in the [`jbx.json` reference](/docs/jbx-json/).
 
 ### Agent loop
 
@@ -42,10 +42,6 @@ Use `install` to test Maven metadata and local consumption before publishing or 
 ## Agent notes
 
 Defaulting to `~/.m2/repository` is convenient for humans but noisy for agents. Prefer `--destination build/local-m2` in reproducible workflows.
-
-## JSON and schema
-
-No `--json` mode is documented for `install`; verify by filesystem layout and a follow-up `resolve`.
 
 ## Verification checklist
 

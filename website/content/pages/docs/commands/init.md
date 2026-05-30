@@ -1,7 +1,7 @@
 ---
 
 title: jbx init command
-description: Create Java sources from built-in or imported templates.
+description: Create Java 25+ scripts from built-in or imported templates.
 ---
 
 # `init`
@@ -44,10 +44,6 @@ Use `init` to create a file that already matches jbx conventions instead of hand
 ## Agent notes
 
 Generated files are starting points. Rename packages/classes and descriptions immediately so template names do not leak into user code.
-
-## JSON and schema
-
-No `--json` mode is documented for `init`; use `jbx template list --json` for structured template discovery.
 
 ## Verification checklist
 

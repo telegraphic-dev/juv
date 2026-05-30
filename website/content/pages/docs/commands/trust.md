@@ -45,10 +45,6 @@ Use `trust` when automation must run a remote script repeatedly and the source h
 
 Trust changes are security changes. Do not add trust for convenience when a local checked-in script would be safer.
 
-## JSON and schema
-
-No `--json` mode is documented for `trust`; use list output plus the remote URL/hash being changed.
-
 ## Verification checklist
 
 - Trust list contains the expected URL/hash after the change.

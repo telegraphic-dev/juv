@@ -1,6 +1,6 @@
 ---
 name: jbx-info
-description: Print parsed directives and derived metadata from Java sources.
+description: Print parsed directives and derived metadata from Java scripts.
 ---
 
 # `info`
@@ -47,7 +47,38 @@ Directive order and comments can carry human meaning. Preserve nearby comments u
 
 ## JSON and schema
 
-No `--json` mode is documented for `info`; use focused subcommands and exact stdout.
+`jbx info tools <script>` returns an IDE/tooling JSON snapshot for one Java source. Example output and field notes: [`info tools JSON`](/docs/schemas/#info-tools-json). Other `info` subcommands print focused text values.
+
+Example JSON:
+
+```json
+{
+  "originalResource": "/workspace/Hello.java",
+  "backingResource": "/workspace/Hello.java",
+  "applicationClassesDir": "/home/user/.cache/jbx/3149f0f2fec709ad/classes",
+  "applicationJar": null,
+  "mainClass": "Hello",
+  "dependencies": [],
+  "repositories": [],
+  "resolvedDependencies": [],
+  "javaVersion": null,
+  "requestedJavaVersion": null,
+  "compileOptions": [],
+  "runtimeOptions": [],
+  "nativeOptions": [],
+  "javaAgents": [],
+  "manifestOptions": [],
+  "files": [],
+  "sources": [],
+  "description": null,
+  "gav": null,
+  "module": null,
+  "docs": {},
+  "enablePreview": false,
+  "enableCds": false,
+  "disableIntegrations": false
+}
+```
 
 ## Verification checklist
 

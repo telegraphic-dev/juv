@@ -1720,7 +1720,7 @@ fn render_local_docs(path: &Path, json: bool, type_filters: &[String]) -> Result
         Ok(format!(
             "{}\n",
             serde_json::to_string_pretty(&serde_json::json!({
-                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
                 "target": path.to_string_lossy(),
                 "sources": docs,
                 "types": types,
@@ -2049,7 +2049,7 @@ fn render_jar_docs(path: &Path, json: bool, type_filters: &[String]) -> Result<S
         Ok(format!(
             "{}\n",
             serde_json::to_string_pretty(&serde_json::json!({
-                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
                 "target": path.to_string_lossy(),
                 "types": types,
                 "generatedFrom": {
@@ -3379,7 +3379,7 @@ fn fetch_remote_javadoc_docs(
         Ok(format!(
             "{}\n",
             serde_json::to_string_pretty(&serde_json::json!({
-                "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+                "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
                 "artifact": {
                     "group": coordinate.group,
                     "id": coordinate.id,
@@ -3440,7 +3440,7 @@ fn publish_docs_outputs(
     let types = extract_docs_types_from_sources(&staged.all_sources)?;
     let markdown = render_docs_markdown(title, Some(&coordinate), &sources, &types)?;
     let json = serde_json::to_string_pretty(&serde_json::json!({
-        "schema": "https://telegraphic.dev/schemas/jbx-docs/v1.json",
+        "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
         "artifact": {
             "group": coordinate.group,
             "id": coordinate.id,

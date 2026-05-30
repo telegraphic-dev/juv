@@ -1,7 +1,7 @@
 ---
 
 title: jbx catalog command
-description: Add and list external catalogs in jbang-catalog.json.
+description: Add and list external catalogs in `jbang-catalog.json`.
 ---
 
 # `catalog`
@@ -47,7 +47,22 @@ Catalog URLs are part of the repository's executable discovery path. Prefer stab
 
 ## JSON and schema
 
-`jbx catalog list --json` returns imported catalog names and locations. Website schema: `/docs/schemas/#catalog-json`.
+`jbx catalog list --json` returns imported catalog names and locations. Example output and field notes: [`catalog JSON`](/docs/schemas/#catalog-json).
+
+Example JSON:
+
+```json
+[
+  {
+    "name": "team",
+    "catalogRef": "https://example.com/jbang-catalog.json",
+    "catalog": "https://example.com/jbang-catalog.json",
+    "description": null,
+    "import": false
+  }
+]
+```
+
 
 ## Verification checklist
 

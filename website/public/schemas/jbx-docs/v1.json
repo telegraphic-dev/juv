@@ -1,0 +1,373 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
+  "title": "jbx docs JSON sidecar",
+  "description": "Structured documentation emitted by `jbx docs --json` and published as jbx docs sidecars. Markdown is the primary reading format; JSON is for structured lookup by tools and agents.",
+  "type": "object",
+  "required": [
+    "generatedFrom"
+  ],
+  "properties": {
+    "schema": {
+      "const": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json"
+    },
+    "target": {
+      "type": "string",
+      "description": "Local path, directory, sidecar file, or Maven coordinate that was documented."
+    },
+    "artifact": {
+      "$ref": "#/$defs/artifact"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "types": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/type"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "generatedFrom": {
+      "$ref": "#/$defs/generatedFrom"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "coordinate": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "package": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "docs": {
+          "type": "array"
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "type": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "qualifiedName": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "protected",
+            "package",
+            "private"
+          ]
+        },
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "array"
+        },
+        "extends": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "implements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string"
+        },
+        "documentation": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constructors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "member": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "qualifiedName": {
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "protected",
+            "package",
+            "private"
+          ]
+        },
+        "modifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "array"
+        },
+        "typeParameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/parameter"
+          }
+        },
+        "returnType": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "throws": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string"
+        },
+        "documentation": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "returnDescription": {
+          "type": "string"
+        },
+        "declaration": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "parameter": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "generatedFrom": {
+      "type": "object",
+      "required": [
+        "source",
+        "jbxVersion"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "javadoc",
+            "jbx-directives",
+            "manual",
+            "mixed"
+          ]
+        },
+        "jbxVersion": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
+      "target": "Hello.java",
+      "sources": [
+        {
+          "path": "Hello.java",
+          "name": "Hello.java",
+          "description": "Prints a greeting.",
+          "docs": [],
+          "dependencies": []
+        }
+      ],
+      "types": [],
+      "generatedFrom": {
+        "source": "jbx-directives",
+        "jbxVersion": "0.0.0"
+      }
+    },
+    {
+      "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
+      "artifact": {
+        "group": "com.fasterxml.jackson.core",
+        "id": "jackson-databind",
+        "version": "2.17.2",
+        "coordinate": "com.fasterxml.jackson.core:jackson-databind:2.17.2"
+      },
+      "summary": "JSON object mapping library for Java.",
+      "packages": [
+        {
+          "name": "com.fasterxml.jackson.databind",
+          "summary": "Data-binding entry points."
+        }
+      ],
+      "types": [
+        {
+          "kind": "class",
+          "name": "ObjectMapper",
+          "qualifiedName": "com.fasterxml.jackson.databind.ObjectMapper",
+          "package": "com.fasterxml.jackson.databind",
+          "visibility": "public",
+          "modifiers": [
+            "public"
+          ],
+          "methods": [
+            {
+              "name": "readValue",
+              "qualifiedName": "com.fasterxml.jackson.databind.ObjectMapper.readValue",
+              "visibility": "public",
+              "typeParameters": [
+                "T"
+              ],
+              "parameters": [
+                {
+                  "name": "content",
+                  "type": "java.lang.String"
+                },
+                {
+                  "name": "valueType",
+                  "type": "java.lang.Class<T>"
+                }
+              ],
+              "returnType": "T",
+              "throws": [
+                "java.io.IOException"
+              ]
+            }
+          ]
+        }
+      ],
+      "dependencies": [],
+      "generatedFrom": {
+        "source": "javadoc",
+        "jbxVersion": "0.0.0"
+      }
+    }
+  ]
+}

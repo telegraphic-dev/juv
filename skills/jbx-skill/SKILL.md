@@ -38,7 +38,20 @@ Use `skill` at the start of an automated workflow so the agent uses guidance bun
 
 ## JSON and schema
 
-`jbx skill list --json` returns bundled skill names and descriptions. Website schema: `/docs/schemas/#skill-json`.
+`jbx skill list --json` returns bundled skill names and descriptions. Example output and field notes: [`skill JSON`](/docs/schemas/#skill-json).
+
+Example JSON:
+
+```json
+{
+  "skills": [
+    {
+      "name": "jbx-check",
+      "description": "Check Java source with structured diagnostics."
+    }
+  ]
+}
+```
 
 ## Verification checklist
 

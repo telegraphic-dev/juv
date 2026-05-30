@@ -45,10 +45,6 @@ Use `app` for scripts the team runs repeatedly: release helpers, report generato
 
 Installing an app changes the user's PATH-visible tool surface. Prefer explicit names and remove old wrappers with `jbx app uninstall` when a script is renamed.
 
-## JSON and schema
-
-No `--json` mode is documented for `app`; use the human list output plus filesystem/PATH checks.
-
 ## Verification checklist
 
 - `jbx app list` shows the installed command.

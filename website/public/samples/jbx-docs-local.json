@@ -1,0 +1,23 @@
+{
+  "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
+  "target": "Hello.java",
+  "sources": [
+    {
+      "path": "Hello.java",
+      "name": "Hello.java",
+      "description": "Prints a greeting.",
+      "docs": [],
+      "dependencies": [],
+      "repositories": [],
+      "sources": [],
+      "java": null,
+      "main": null,
+      "artifact": null
+    }
+  ],
+  "types": [],
+  "generatedFrom": {
+    "source": "jbx-directives",
+    "jbxVersion": "0.0.0"
+  }
+}

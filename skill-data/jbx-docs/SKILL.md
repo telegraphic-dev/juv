@@ -1,6 +1,6 @@
 ---
 name: jbx-docs
-description: Display documentation from Java sources or Maven artifacts.
+description: Generate Markdown or JSON documentation from local sources or Maven artifacts.
 ---
 
 # `docs`
@@ -45,7 +45,30 @@ Docs output is context, not a build result. If docs reveal a method signature, s
 
 ## JSON and schema
 
-`jbx docs ... --json` returns docs metadata, generated source info, and structured type/member details. Website schema: `/docs/schemas/#docs-json`.
+`jbx docs ... --json` returns docs metadata, generated source info, and structured type/member details. Example output and downloadable sample: [`docs JSON`](/docs/schemas/#docs-json).
+
+Example JSON:
+
+```json
+{
+  "schema": "https://jbx.telegraphic.dev/schemas/jbx-docs/v1.json",
+  "target": "Hello.java",
+  "sources": [
+    {
+      "path": "Hello.java",
+      "name": "Hello.java",
+      "description": "Prints a greeting.",
+      "docs": [],
+      "dependencies": []
+    }
+  ],
+  "types": [],
+  "generatedFrom": {
+    "source": "jbx-directives",
+    "jbxVersion": "0.0.0"
+  }
+}
+```
 
 ## Verification checklist
 

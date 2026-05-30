@@ -46,7 +46,35 @@ Prefer source edits unless AST import is explicitly needed. If importing JSON, p
 
 ## JSON and schema
 
-`jbx graph dump` emits JavaParser-native AST JSON. Website schema: `/docs/schemas/#graph-json`.
+`jbx graph dump <script>` emits JavaParser-native AST JSON. Output can be large; see the compact example and downloadable sample in [`graph JSON`](/docs/schemas/#graph-json).
+
+Example JSON:
+
+```json
+{
+  "!": "com.github.javaparser.ast.CompilationUnit",
+  "range": {
+    "beginLine": 1,
+    "beginColumn": 1,
+    "endLine": 3,
+    "endColumn": 2
+  },
+  "imports": [],
+  "types": [
+    {
+      "!": "com.github.javaparser.ast.body.ClassOrInterfaceDeclaration",
+      "isCompact": "true",
+      "members": [
+        {
+          "!": "com.github.javaparser.ast.body.MethodDeclaration",
+          "name": { "identifier": "main" }
+        }
+      ]
+    }
+  ]
+}
+```
+
 
 ## Verification checklist
 

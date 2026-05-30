@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
+  "title": "jbx.json descriptor",
+  "description": "Descriptor for jbx publish/install metadata. It names the main Java source, Maven coordinates, dependencies, source files, repositories, and Maven Central metadata.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional editor/schema hint. Use https://jbx.telegraphic.dev/schemas/jbx-json/v1.json. jbx ignores unknown fields, so this is safe to include."
+    },
+    "main": {
+      "type": "string",
+      "description": "Main Java source. Relative paths resolve from the descriptor directory. Existing paths win; otherwise jbx also checks .java/.jsh/.jav extensions and Java FQN matches under the descriptor directory."
+    },
+    "group": {
+      "type": "string",
+      "description": "Maven groupId, for example dev.telegraphic.demo. Required for publish/install unless supplied by //GAV."
+    },
+    "id": {
+      "type": "string",
+      "description": "Maven artifactId, for example hello-tool. Required for publish/install unless supplied by //GAV."
+    },
+    "version": {
+      "type": "string",
+      "description": "Artifact version. Maven Central publishing rejects -SNAPSHOT versions."
+    },
+    "package": {
+      "type": "string",
+      "description": "Java package override used when staging compact/unpackaged sources for publishing."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable artifact name for generated POM metadata. Defaults to group:id."
+    },
+    "description": {
+      "type": "string",
+      "description": "Artifact description for generated POM metadata. Falls back to //DESCRIPTION or a generated description."
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Project URL for Maven metadata. Required for Maven Central dry-run/publish."
+    },
+    "licenses": {
+      "type": "array",
+      "description": "Project licenses for Maven metadata. Required for Maven Central dry-run/publish.",
+      "items": { "$ref": "#/$defs/license" }
+    },
+    "developers": {
+      "type": "array",
+      "description": "Developer metadata for generated POM metadata. Required for Maven Central dry-run/publish.",
+      "items": { "$ref": "#/$defs/developer" }
+    },
+    "scm": {
+      "$ref": "#/$defs/scm",
+      "description": "Source-control metadata for generated POM metadata. Required for Maven Central dry-run/publish."
+    },
+    "java": {
+      "type": "string",
+      "description": "Requested Java version, equivalent to //JAVA when descriptor metadata is used."
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Compile-time/public dependencies as Maven coordinates. Equivalent to //DEPS. Rendered as normal Maven dependencies.",
+      "items": { "$ref": "#/$defs/coordinate" }
+    },
+    "runtimeDependencies": {
+      "type": "array",
+      "description": "Runtime-only dependencies as Maven coordinates. Equivalent to //RUNTIME. Rendered with Maven runtime scope and not needed on the compile classpath.",
+      "items": { "$ref": "#/$defs/coordinate" }
+    },
+    "sources": {
+      "type": "array",
+      "description": "Additional source files to include in the published artifact. Omit this field to let jbx auto-discover local Java sources; set it explicitly to control the source list.",
+      "items": { "type": "string" }
+    },
+    "repositories": {
+      "type": "array",
+      "description": "Additional Maven repositories for dependency resolution. Entries may be bare URLs or id=url values.",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "coordinate": {
+      "type": "string",
+      "pattern": "^[^:]+:[^:]+:[^:]+$",
+      "examples": ["info.picocli:picocli:4.7.7"]
+    },
+    "license": {
+      "type": "object",
+      "required": ["name", "url"],
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": true
+    },
+    "developer": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "organization": { "type": "string" },
+        "organizationUrl": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": true
+    },
+    "scm": {
+      "type": "object",
+      "required": ["connection", "url"],
+      "properties": {
+        "connection": { "type": "string" },
+        "developerConnection": { "type": "string" },
+        "url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
+      "main": "src/main/java/dev/telegraphic/demo/HelloTool.java",
+      "group": "dev.telegraphic.demo",
+      "id": "hello-tool",
+      "version": "1.0.0",
+      "java": "25",
+      "dependencies": ["info.picocli:picocli:4.7.7"],
+      "runtimeDependencies": ["org.slf4j:slf4j-nop:2.0.17"]
+    },
+    {
+      "$schema": "https://jbx.telegraphic.dev/schemas/jbx-json/v1.json",
+      "main": "dev.telegraphic.demo.HelloTool",
+      "group": "dev.telegraphic.demo",
+      "id": "hello-tool",
+      "version": "1.0.0",
+      "name": "Hello Tool",
+      "description": "Small CLI published with jbx.",
+      "url": "https://github.com/telegraphic-dev/hello-tool",
+      "licenses": [
+        { "name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0.txt" }
+      ],
+      "developers": [
+        { "name": "Telegraphic", "organization": "Telegraphic", "organizationUrl": "https://telegraphic.dev" }
+      ],
+      "scm": {
+        "connection": "scm:git:https://github.com/telegraphic-dev/hello-tool.git",
+        "developerConnection": "scm:git:ssh://git@github.com/telegraphic-dev/hello-tool.git",
+        "url": "https://github.com/telegraphic-dev/hello-tool"
+      },
+      "sources": ["src/main/java/dev/telegraphic/demo/HelloTool.java"],
+      "repositories": ["snapshots=https://repo.example.test/maven"]
+    }
+  ]
+}

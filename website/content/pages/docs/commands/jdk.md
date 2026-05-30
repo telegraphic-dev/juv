@@ -45,10 +45,6 @@ Use `jdk` when `JAVA_HOME`, CI image defaults, or compact-source support are in 
 
 Installing a JDK changes machine state. In shared CI images or developer machines, prefer reporting the missing version unless installation is part of the task.
 
-## JSON and schema
-
-No `--json` mode is documented for `jdk`; use `doctor --json` for structured environment status.
-
 ## Verification checklist
 
 - Required Java version has a concrete home path.

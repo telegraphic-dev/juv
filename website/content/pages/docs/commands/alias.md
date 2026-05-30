@@ -1,7 +1,7 @@
 ---
 
 title: jbx alias command
-description: Add, remove, and list aliases from nearby jbang-catalog.json files.
+description: Add, remove, and list aliases from `jbang-catalog.json`.
 ---
 
 # `alias`
@@ -47,7 +47,32 @@ Preserve descriptions; they are future discovery text for humans and agents. Do 
 
 ## JSON and schema
 
-`jbx alias list --json` returns aliases and target metadata from the discovered catalog. Website schema: `/docs/schemas/#alias-json`.
+`jbx alias list --json` returns aliases and target metadata from the discovered catalog. Example output and field notes: [`alias JSON`](/docs/schemas/#alias-json).
+
+Example JSON:
+
+```json
+[
+  {
+    "name": "hello",
+    "scriptRef": "Hello.java",
+    "script": "/workspace/Hello.java",
+    "description": "Run the greeting script",
+    "arguments": [],
+    "dependencies": [],
+    "repositories": [],
+    "sources": [],
+    "files": [],
+    "classpaths": [],
+    "compileOptions": [],
+    "runtimeOptions": [],
+    "javaAgents": [],
+    "javaVersion": null,
+    "mainClass": null
+  }
+]
+```
+
 
 ## Verification checklist
 

@@ -1,6 +1,6 @@
 ---
 name: jbx-publish
-description: Publish Java projects to Maven repositories, including Maven Central.
+description: Build Maven-ready bundles, local served repositories, or Portal uploads.
 ---
 
 # `publish`
@@ -30,7 +30,7 @@ jbx publish --file jbx.json --dry-run
 jbx publish --file jbx.json --serve 0
 ```
 
-Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload belongs in release automation with approved credentials.
+Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload belongs in release automation with approved credentials. The descriptor fields are documented in the [`jbx.json` reference](/docs/jbx-json/).
 
 ### Agent loop
 
@@ -42,10 +42,6 @@ Use `publish` in dry-run or local-serve mode during PR work. Real Portal upload 
 ## Agent notes
 
 Publishing is the command with the sharpest edges. Never use `--publish` just to satisfy a docs or PR check.
-
-## JSON and schema
-
-No `--json` mode is documented for `publish`; verify generated bundle files, served repository responses, or Portal status from release automation.
 
 ## Verification checklist
 

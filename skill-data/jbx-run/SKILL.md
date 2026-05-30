@@ -1,6 +1,6 @@
 ---
 name: jbx-run
-description: Run Java source or Maven artifact
+description: Compile and run one Java source file, including Java 25 compact scripts, with JBang-style directives and CLI overrides.
 ---
 
 # `run`
@@ -65,10 +65,6 @@ jbx com.h2database:h2
 ## Agent notes
 
 `run` executes arbitrary user code. Prefer `info`, `build`, `check --json`, or `doctor --json` first when the command source, dependencies, or environment are not understood.
-
-## JSON and schema
-
-No `--json` mode: stdout/stderr belong to the program being run. Use `jbx check --json`, `jbx info ...`, `jbx search --json`, or `jbx doctor --json` for machine-readable preflight facts before execution.
 
 ## Verification checklist
 
