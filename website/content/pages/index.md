@@ -77,6 +77,7 @@ jbx hello.java
 `jbx` builds on the shoulders of giants:
 
 - [JBang](https://www.jbang.dev/) — Inspiration for Java scripting, directives, and the practical “run this Java file now” workflow.
+- [Zero](https://zerolang.ai/) — Agent-first CLI north-star language: scriptable, inspectable, deterministic, and friendly to autonomous coding loops.
 - [JUnit](https://junit.org/junit5/) — the standard testing platform for modern Java.
 - [JaCoCo](https://www.jacoco.org/jacoco/) — Java code coverage reports for test runs.
 - [Palantir Java Format](https://github.com/palantir/palantir-java-format) — deterministic Java formatting.
