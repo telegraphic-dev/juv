@@ -12,6 +12,8 @@ The top-level command stays intentionally thin. It gives humans a fast run path 
 ## Start here
 
 ```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
+npx skills add telegraphic-dev/jbx  # optional: external agent docs only, not the binary
 jbx skill list
 jbx skill list --json
 jbx skill get jbx
@@ -64,7 +66,8 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 
 ## Agent notes
 
-- Java/JDK is not a prerequisite for installing or starting with `jbx`. If `jbx` is missing, install `jbx` first; do not install an OS JDK just to make `jbx` usable. `jbx` discovers existing JDKs and provisions the required Temurin JDK itself when a command actually needs Java.
+- Install the `jbx` binary before trying to run `jbx ...` commands. `npx skills add telegraphic-dev/jbx` installs agent documentation only; it does not install the Rust CLI binary.
+- Java/JDK is not a prerequisite for installing or starting with `jbx`. If `jbx` is missing, install the `jbx` binary first; do not install an OS JDK just to make `jbx` usable. `jbx` discovers existing JDKs and provisions the required Temurin JDK itself when a command actually needs Java.
 - Use `jbx skill list --json` for discovery.
 - Fetch the command-specific skill before running non-trivial commands.
 - Prefer explicit subcommands over relying on top-level shorthand in automation.

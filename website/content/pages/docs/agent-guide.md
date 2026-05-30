@@ -9,6 +9,7 @@ Use `jbx` as a command-line surface, not as a guessing game. Prefer commands tha
 
 ## Website contract
 
+- Install the `jbx` binary before trying to run `jbx ...` commands. `npx skills add telegraphic-dev/jbx` installs agent documentation only; it does not install the Rust CLI binary.
 - Prefer the Markdown sibling of any documentation page over scraping HTML when building context.
 - Use canonical links under `https://jbx.telegraphic.dev/`.
 - Discover command-specific guidance from `jbx skill list` and `jbx skill get <name>` so the installed binary stays the source of truth.
@@ -18,6 +19,8 @@ Use `jbx` as a command-line surface, not as a guessing game. Prefer commands tha
 Prefer these commands for automation:
 
 ```bash
+curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
+npx skills add telegraphic-dev/jbx  # optional: external agent docs only, not the binary
 jbx skill list
 jbx skill get
 jbx check <path> --json
@@ -35,7 +38,7 @@ jbx cache path
 
 ## Good agent behavior
 
-- Treat `jbx` as the Java bootstrapper. A fresh machine does not need Java/JDK installed before `jbx`; install `jbx` first, then let `jbx` discover or provision the required Temurin JDK when a Java command actually needs it.
+- Treat `jbx` as the Java bootstrapper, but remember there are two installs: the `jbx` binary runs commands, while `npx skills add telegraphic-dev/jbx` only installs SKILL.md documentation for agents. A fresh machine does not need Java/JDK installed before `jbx`; install the `jbx` binary first, then let `jbx` discover or provision the required Temurin JDK when a Java command actually needs it.
 - Run the tightest command that answers the question.
 - Use `jbx doctor --json` before guessing about broken JDKs, unreachable Maven metadata, unwritable caches, formatter fallback, remote trust, dependency resolution, or optional publishing/native toolchain setup. Add `--cache-dir` for isolated agent runs, `--repo`/`--repos` for extra repositories, `--publish` for GPG checks, and `--native` for GraalVM `native-image` checks.
 - Start with `jbx skill get` when you need version-matched workflow guidance for the installed binary.
