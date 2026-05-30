@@ -203,6 +203,12 @@ def write(path: Path, content: str) -> None:
 
 
 def generate() -> None:
+    if SKILL_DATA_DIR.exists():
+        for nested in sorted(SKILL_DATA_DIR.rglob("*"), reverse=True):
+            if nested.is_file():
+                nested.unlink()
+            elif nested.is_dir():
+                nested.rmdir()
     if INSTALLABLE_SKILL_DIR.parent.exists():
         for child in INSTALLABLE_SKILL_DIR.parent.iterdir():
             if child.is_dir() and child.name != INSTALLABLE_SKILL_DIR.name:
@@ -217,7 +223,7 @@ def generate() -> None:
         if not page.exists():
             raise SystemExit(f"Missing command page: {page}")
         name = skill_name(page_stem)
-        write(SKILL_DATA_DIR / name / "SKILL.md", skill_markdown(page_stem))
+        write(SKILL_DATA_DIR / f"{name}.md", skill_markdown(page_stem))
     write(INSTALLABLE_SKILL_DIR / "SKILL.md", installable_jbx_skill())
 
 

@@ -22,7 +22,7 @@ python3 scripts/generate-agent-docs.py
 
 That script reads `website/content/pages/docs/commands/*.md` and writes derived skill copies:
 
-- `skill-data/jbx*/SKILL.md` for `jbx skill list` / `jbx skill get`
+- `skill-data/jbx*.md` for `jbx skill list` / `jbx skill get`
 - `skills/jbx/SKILL.md` as the only installable discovery stub; command-specific skills are served by the binary, not exposed statically
 
 `scripts/check-docs-website.sh` reruns the generator and fails if the derived skills are stale. Edit command docs first, then regenerate skills.
