@@ -39,7 +39,7 @@ Implemented now:
 - `jbx fmt [path...]` format Java files with Palantir Java Format, including Java 25 compact scripts
 - `jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` previews OpenRewrite changes and writes `rewrite/rewrite.patch`
 - `jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--option key=value] [--report dir] [--json] [--fail-on-changes] [--no-fail-on-invalid-recipes] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` applies OpenRewrite changes to source files
-- `jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json]` searches Maven Central for OpenRewrite modules by group and recipe/module name
+- `jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]` searches Maven Central for OpenRewrite modules by group and recipe/module name
 - `jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json] [--cache-dir dir] [--repo id=url] [--rewrite-version version]` lists/searches recipes available from a module; human output is a table with derived short names and FQNs, JSON includes descriptors/options
 - `jbx graph dump <script.java>` print JavaParser's native AST JSON serialization
 - `jbx graph import <ast.json> [-o script.java]` converts JavaParser's native AST JSON serialization back to Java source

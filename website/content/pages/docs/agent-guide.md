@@ -25,7 +25,7 @@ jbx check <path> --json
 jbx search <query> --json
 jbx docs <source|dir|GAV> --json
 jbx rewrite patch --recipe <short|fqn> --source <path> --json
-jbx rewrite modules --json
+jbx rewrite modules [--rewrite-version version] --json
 jbx rewrite recipes <short|GAV> --detail --json
 jbx info tools <script.java>
 jbx info deps <script.java>
@@ -40,7 +40,7 @@ jbx cache path
 - Keep local caches between runs where possible; Java dependency downloads are not a personality test.
 - Treat `jbx docs` Markdown as context and `--json` as structured lookup data.
 - Prefer `jbx rewrite patch` over `jbx rewrite apply` until the generated `rewrite/rewrite.patch` has been inspected.
-- Use `jbx rewrite modules --json` and `jbx rewrite recipes <module> --detail --json` to discover OpenRewrite modules, recipe short names/FQNs, descriptions, and options instead of guessing.
+- Use `jbx rewrite modules [--rewrite-version version] --json` and `jbx rewrite recipes <module> --detail --json` to discover OpenRewrite modules, recipe short names/FQNs, descriptions, and options instead of guessing.
 - Use `--option key=value` for recipe parameters, `--report dir` for patch location, `--fail-on-changes` for CI-style checks, `--repo id=url` for private recipe modules, `--cache-dir dir` for isolated jobs, and `--rewrite-version version` when reproducing a specific OpenRewrite run.
 - Preserve JBang-compatible directives in scripts unless a task explicitly asks to change behavior.
 - When publishing, use dry-run and inspect staged artifacts before real release workflows.

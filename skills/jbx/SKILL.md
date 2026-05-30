@@ -43,7 +43,7 @@ jbx check [path...] [--json]
 jbx test [script.java|directory]
 jbx rewrite patch --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
 jbx rewrite apply --recipe <short|fqn> [--module <short|GAV>] [--source path] [--json]
-jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json]
+jbx rewrite modules [--search term] [--group groupId] [--limit n] [--json] [--rewrite-version version]
 jbx rewrite recipes <short|GAV> [--search term] [--limit n] [--detail] [--json]
 jbx docs <GAV|source|dir> [--json]
 jbx skill list
