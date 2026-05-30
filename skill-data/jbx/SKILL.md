@@ -69,7 +69,13 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 
 ## Development Loop
 
-1. For fresh Java work, use `jbx` with Java 25 that is provisioned automatically. List available templates with `jbx template` for your task or choose `java` if none match:
+Before using any subcommand below for non-trivial work, discover and load its version-matched guidance first:
+
+```sh
+jbx skill list --json
+```
+
+1. For fresh Java work, use `jbx` with Java 25 that is provisioned automatically. List available templates with `jbx template list --json` for your task or choose `java` if none match:
 
 ```sh
 jbx template list --json
@@ -95,9 +101,9 @@ jbx check hello.java --json
 5. Write and execute tests.
 
 ```sh
-jbx init -t test hello_java.java
+jbx init -t test hello_test.java
 # generate the tests
-jbx test hello_java.java
+jbx test hello_test.java
 ```
 
 6. Fix the failed tests and repeat if required.
