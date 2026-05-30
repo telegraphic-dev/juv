@@ -37,7 +37,7 @@ The current artwork is generated and resized from the supplied transparent sourc
 - Use the square icon for favicon, app icons, and tiny contexts.
 - Keep the mark on dark, blue, white, or transparent backgrounds.
 - Do not add new gradients to the logo. The site can have atmosphere; the mark should stay recognizable.
-- Pair `jbx` with concrete wording: Java scripts, Maven tools, agent docs, JBang compatibility.
+- Pair `jbx` with concrete wording: Java scripts, executable artifacts, agent docs, JBang compatibility.
 
 ## Voice
 

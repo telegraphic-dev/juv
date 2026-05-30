@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
@@ -85,7 +86,13 @@ pub fn run(options: MavenToolOptions) -> Result<i32> {
                     .is_some_and(|name| name == jar_name.as_str())
             })
             .ok_or_else(|| anyhow!("resolved classpath did not contain primary JAR {jar_name}"))?;
-        java.arg("-jar").arg(primary_jar);
+        if let Some(main_class) = read_main_class_from_jar(primary_jar)? {
+            java.arg("-cp")
+                .arg(std::env::join_paths(&classpath)?)
+                .arg(main_class);
+        } else {
+            java.arg("-jar").arg(primary_jar);
+        }
     }
     java.args(options.args);
     let status = java.status().context("failed to launch java")?;
@@ -97,4 +104,39 @@ pub fn run(options: MavenToolOptions) -> Result<i32> {
         }
     }
     Ok(status.code().unwrap_or(1))
+}
+
+fn read_main_class_from_jar(jar: &std::path::Path) -> Result<Option<String>> {
+    let file = std::fs::File::open(jar)
+        .with_context(|| format!("failed to open primary JAR {}", jar.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .with_context(|| format!("failed to read primary JAR {}", jar.display()))?;
+    let Ok(mut manifest) = archive.by_name("META-INF/MANIFEST.MF") else {
+        return Ok(None);
+    };
+    let mut content = String::new();
+    manifest
+        .read_to_string(&mut content)
+        .with_context(|| format!("failed to read manifest from {}", jar.display()))?;
+    Ok(manifest_attribute(&content, "Main-Class"))
+}
+
+fn manifest_attribute(manifest: &str, key: &str) -> Option<String> {
+    let mut unfolded: Vec<String> = Vec::new();
+    for line in manifest.lines() {
+        if let Some(continuation) = line.strip_prefix(' ') {
+            if let Some(last) = unfolded.last_mut() {
+                last.push_str(continuation);
+            }
+        } else {
+            unfolded.push(line.to_string());
+        }
+    }
+    let prefix = format!("{key}:");
+    unfolded.into_iter().find_map(|line| {
+        line.strip_prefix(&prefix)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
 }

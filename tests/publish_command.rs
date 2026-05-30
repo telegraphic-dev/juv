@@ -51,6 +51,15 @@ fn zip_names_from_bytes(bytes: Vec<u8>) -> Vec<String> {
     names
 }
 
+fn zip_entry_from_bytes(bytes: Vec<u8>, name: &str) -> String {
+    let reader = std::io::Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(reader).unwrap();
+    let mut entry = archive.by_name(name).unwrap();
+    let mut content = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut content).unwrap();
+    content
+}
+
 #[test]
 fn publish_dry_run_uses_flat_id_metadata_and_version_override() {
     let tmp = tempfile::tempdir().unwrap();
@@ -179,6 +188,10 @@ class Helper {
     );
 
     let pom = zip_entry(&bundle, &format!("{base}/hello-tool-2.0.0.pom"));
+    let manifest = zip_entry_from_bytes(
+        zip_entry_bytes(&bundle, &format!("{base}/hello-tool-2.0.0.jar")),
+        "META-INF/MANIFEST.MF",
+    );
     let sources_names = zip_names_from_bytes(zip_entry_bytes(
         &bundle,
         &format!("{base}/hello-tool-2.0.0-sources.jar"),
@@ -206,6 +219,10 @@ class Helper {
             .iter()
             .any(|name| name.ends_with("Hello.html") || name.ends_with("HelloTool.html")),
         "{javadoc_names:?}"
+    );
+    assert!(
+        manifest.contains("Main-Class: dev.telegraphic.demo.hello.Hello"),
+        "{manifest}"
     );
     assert!(
         pom.contains("<groupId>dev.telegraphic.demo</groupId>"),

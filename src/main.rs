@@ -6154,7 +6154,12 @@ fn prepare_publish_repository(
         descriptor.coordinates.id, descriptor.coordinates.version
     );
     let jar = artifact_dir.join(format!("{prefix}.jar"));
-    write_directory_jar(&build.classes_dir, &jar)?;
+    let main_class = build.main_class.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "could not infer main class for published artifact; add //MAIN fully.qualified.ClassName"
+        )
+    })?;
+    write_classes_jar_with_manifest(&build.classes_dir, &jar, main_class)?;
     let sources_jar = artifact_dir.join(format!("{prefix}-sources.jar"));
     write_directory_jar(&staging_dir, &sources_jar)?;
     let javadoc_jar = artifact_dir.join(format!("{prefix}-javadoc.jar"));
@@ -6517,6 +6522,32 @@ fn write_directory_jar(source_dir: &Path, jar: &Path) -> Result<()> {
     let mut zip = zip::ZipWriter::new(file);
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    write_directory_entries(&mut zip, source_dir, options)?;
+    zip.finish()?;
+    Ok(())
+}
+
+fn write_classes_jar_with_manifest(source_dir: &Path, jar: &Path, main_class: &str) -> Result<()> {
+    let file = fs::File::create(jar)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("META-INF/MANIFEST.MF", options)?;
+    zip.write_all(render_publish_manifest(main_class).as_bytes())?;
+    write_directory_entries(&mut zip, source_dir, options)?;
+    zip.finish()?;
+    Ok(())
+}
+
+fn render_publish_manifest(main_class: &str) -> String {
+    format!("Manifest-Version: 1.0\nMain-Class: {main_class}\n\n")
+}
+
+fn write_directory_entries(
+    zip: &mut zip::ZipWriter<fs::File>,
+    source_dir: &Path,
+    options: zip::write::SimpleFileOptions,
+) -> Result<()> {
     for entry in walkdir::WalkDir::new(source_dir) {
         let entry = entry?;
         if !entry.file_type().is_file() {
@@ -6530,7 +6561,6 @@ fn write_directory_jar(source_dir: &Path, jar: &Path) -> Result<()> {
         zip.start_file(rel, options)?;
         zip.write_all(&fs::read(entry.path())?)?;
     }
-    zip.finish()?;
     Ok(())
 }
 

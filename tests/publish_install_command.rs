@@ -34,6 +34,7 @@ public class Hello {
   "group": "dev.telegraphic.demo",
   "id": "hello-tool",
   "version": "1.0.0",
+  "java": "21",
   "package": "dev.telegraphic.demo.hello",
   "description": "Hello tool",
   "url": "https://github.com/telegraphic-dev/hello-tool",
@@ -220,6 +221,7 @@ fn publish_serve_exposes_prepared_artifacts_over_maven_repository_layout() {
         .arg("publish")
         .arg("--serve")
         .arg("0")
+        .arg("--skip-signing")
         .arg("--file")
         .arg(tmp.path().join("jbx.json"))
         .arg("--target-dir")
@@ -275,7 +277,6 @@ fn publish_serve_exposes_prepared_artifacts_over_maven_repository_layout() {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    kill_child(&mut child);
     let pom = pom.unwrap_or_else(|| panic!("failed to fetch {pom_url}"));
     assert!(
         pom.contains("<groupId>dev.telegraphic.demo</groupId>"),
@@ -289,6 +290,18 @@ fn publish_serve_exposes_prepared_artifacts_over_maven_repository_layout() {
     let metadata_sha1 =
         metadata_sha1.unwrap_or_else(|| panic!("failed to fetch {metadata_sha1_url}"));
     assert_eq!(metadata_sha1.trim().len(), 40, "{metadata_sha1}");
+
+    let run = jbx_command()
+        .arg("--repo")
+        .arg(&url)
+        .arg("dev.telegraphic.demo:hello-tool:1.0.0")
+        .arg("--cache-dir")
+        .arg(tmp.path().join("run-cache"))
+        .output()
+        .unwrap();
+    assert_success(&run);
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "hello");
+    kill_child(&mut child);
 }
 
 fn kill_child(child: &mut Child) {

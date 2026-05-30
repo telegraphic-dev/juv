@@ -1,6 +1,6 @@
 # jbx
 
-`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, Maven tool execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
+`jbx` is the single agent-friendly entry point to the Java ecosystem: Java script running, executable artifact execution, testing, formatting, publishing, cache management, documentation, diagnostics, and JDK handling behind one CLI.
 
 ```bash
 curl -fsSL https://jbx.telegraphic.dev/install.sh | bash
@@ -166,6 +166,8 @@ jbx run Hello.java world
 jbx dev.telegraphic:hello-tool:1.0.0 -- --help
 # runs an executable JAR from Maven coordinates
 ```
+
+The website includes an end-to-end guide that builds a representative Picocli-based Java CLI, verifies it with the jbx development loop, publishes it to Maven Central, and runs it back as `jbx group:artifact:version`.
 
 ### `jbx.json` publish descriptor
 

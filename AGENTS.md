@@ -25,7 +25,7 @@ This repo is `jbx` in user-facing CLI terms: a Rust-native JBang-compatible Java
 
 - Repository: `telegraphic-dev/juv`.
 - Main binary: `jbx`.
-- `jbx Hello.java` runs a script, while `jbx group:artifact:version -- args` runs an executable Maven tool.
+- `jbx Hello.java` runs a script, while `jbx group:artifact:version -- args` runs an executable artifact.
 - Rust crate version in source may intentionally stay as placeholder `0.0.0`; release workflows derive publish versions from tags.
 - Java baseline is **25**. If `--java` or `//JAVA` is omitted, preserve Java 25 behavior unless a test proves otherwise.
 - The implementation should avoid depending on Coursier or JBang at runtime. Use native Rust resolver/JDK/catalog logic where it already exists.
