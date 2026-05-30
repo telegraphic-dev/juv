@@ -6,7 +6,7 @@ description: Create Java sources from built-in or imported templates.
 
 # `init`
 
-Create Java 25+ scripts from built-in or imported templates.
+Create Java sources from built-in or imported templates.
 
 ## When to use it
 
@@ -19,7 +19,7 @@ Create Java 25+ scripts from built-in or imported templates.
 ```bash
 jbx init Hello.java
 jbx init --template cli tools/hello.java
-jbx init --template test src/test/java/SmokeTest.java
+jbx init -t test hello_test.java
 ```
 
 ## Real-life examples

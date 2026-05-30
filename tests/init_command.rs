@@ -205,6 +205,29 @@ fn init_compact_template_uses_java_25_compact_source_shape() {
 }
 
 #[test]
+fn init_test_template_creates_junit_test_from_snake_case_filename() {
+    let tmp = tempfile::tempdir().unwrap();
+    let script = tmp.path().join("hello_test.java");
+
+    let out = juv_command()
+        .current_dir(tmp.path())
+        .arg("init")
+        .arg("-t")
+        .arg("test")
+        .arg("hello_test.java")
+        .output()
+        .unwrap();
+
+    assert_success(&out);
+    let content = fs::read_to_string(&script).unwrap();
+    assert!(content.starts_with("///usr/bin/env jbx"));
+    assert!(content.contains("//DEPS org.junit.jupiter:junit-jupiter-api:5.11.4"));
+    assert!(content.contains("import org.junit.jupiter.api.Test;"));
+    assert!(content.contains("class HelloTest"));
+    assert!(content.contains("@Test"));
+}
+
+#[test]
 fn init_rejects_unknown_template() {
     let tmp = tempfile::tempdir().unwrap();
 
@@ -232,4 +255,5 @@ fn template_list_prints_builtin_templates() {
     assert!(stdout.contains("compact\tJava 25 compact-source Hello World script"));
     assert!(stdout.contains("cli\tPicocli command-line application"));
     assert!(stdout.contains("agent\tJava agent skeleton"));
+    assert!(stdout.contains("test\tJUnit test class"));
 }

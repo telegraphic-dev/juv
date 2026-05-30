@@ -9,8 +9,8 @@ const distDir = path.join(root, 'dist');
 const checkOnly = process.argv.includes('--check');
 const site = {
   origin: 'https://jbx.telegraphic.dev',
-  title: 'jbx — Java toolbox for scripts, tools, and automation',
-  description: 'One practical CLI for Java scripts, Maven tools, tests, formatting, publishing, dependency lookup, documentation, diagnostics, and JDK handling.'
+  title: 'jbx — All-in-One Java CLI',
+  description: 'Highly opinionated native command line utility for daily Java tasks: scripts, Maven artifacts, templates, JDKs, docs, formatting, tests, rewriting, ASTs, and publishing.'
 };
 
 function escapeHtml(value = '') {
@@ -225,6 +225,19 @@ ${rawPath ? `<link rel="alternate" type="text/markdown" href="${escapeHtml(site.
     localStorage.setItem(key, next);
     apply(next);
   });
+  const installTabs = [...document.querySelectorAll('[data-install-tab]')];
+  const installPanels = [...document.querySelectorAll('[data-install-panel]')];
+  const showInstallPanel = name => {
+    for (const tab of installTabs) {
+      tab.setAttribute('aria-selected', tab.dataset.installTab === name ? 'true' : 'false');
+    }
+    for (const panel of installPanels) {
+      panel.hidden = panel.dataset.installPanel !== name;
+    }
+  };
+  for (const tab of installTabs) {
+    tab.addEventListener('click', () => showInstallPanel(tab.dataset.installTab));
+  }
   const commandSearch = document.querySelector('[data-command-search]');
   const commandLinks = [...document.querySelectorAll('[data-command-link]')];
   const filterCommands = () => {

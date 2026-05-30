@@ -18,7 +18,7 @@ Inspect or clear compiled-script cache paths and entries.
 ```bash
 jbx cache path
 jbx cache list --json
-jbx cache clear --older-than 30d
+jbx cache clear
 ```
 
 ## Real-life examples

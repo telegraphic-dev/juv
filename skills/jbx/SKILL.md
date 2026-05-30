@@ -50,7 +50,7 @@ Use an explicit `--` only when the launched program needs to receive a literal d
 - [`alias`](/docs/commands/alias/) — Add, remove, and list aliases from nearby `jbang-catalog.json` files.
 - [`catalog`](/docs/commands/catalog/) — Add and list external catalogs in `jbang-catalog.json`.
 - [`template`](/docs/commands/template/) — List built-in and imported templates for `jbx init`.
-- [`init`](/docs/commands/init/) — Create Java 25+ scripts from built-in or imported templates.
+- [`init`](/docs/commands/init/) — Create Java sources from built-in or imported templates.
 - [`export`](/docs/commands/export/) — Export local, portable, or native runnable artifacts.
 - [`publish`](/docs/commands/publish/) — Publish Java projects to Maven repositories, including Maven Central.
 - [`install`](/docs/commands/install/) — Install the current project into a Maven repository layout, usually `~/.m2/repository`.

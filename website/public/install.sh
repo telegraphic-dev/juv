@@ -65,13 +65,18 @@ tar -xzf "$tmp/$asset" -C "$tmp"
 cp "$tmp/$bin" "$install_dir/$bin"
 chmod +x "$install_dir/$bin"
 
+echo "jbx installed: $($install_dir/$bin --version)"
+
 case ":$PATH:" in
   *":$install_dir:"*)
-    echo "jbx installed: $($install_dir/$bin --version)"
     ;;
   *)
-    echo "jbx installed to $install_dir/$bin"
-    echo "Add this to your shell profile if it is not already on PATH:"
+    echo
+    echo "Add jbx to PATH for this terminal:"
     echo "  export PATH=\"$install_dir:\$PATH\""
+    echo
+    echo "Make it permanent by adding that line to your shell profile, for example:"
+    echo "  echo 'export PATH=\"$install_dir:\$PATH\"' >> ~/.bashrc"
+    echo "  echo 'export PATH=\"$install_dir:\$PATH\"' >> ~/.zshrc"
     ;;
 esac

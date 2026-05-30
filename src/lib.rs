@@ -216,7 +216,11 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
                 options.script.display()
             )
         })?;
-    if !is_java_identifier(base_name) {
+    let class_name = match builtin_template.as_ref() {
+        Ok(template) if template.name == "test" => java_class_name_from_stem(base_name),
+        _ => base_name.to_string(),
+    };
+    if !is_java_identifier(&class_name) {
         return Err(anyhow!(
             "'{base_name}' is not a valid class name in Java; use a Java identifier filename"
         ));
@@ -231,7 +235,7 @@ pub fn init_script(options: InitOptions) -> Result<PathBuf> {
     }
 
     let content = match builtin_template {
-        Ok(template) => render_init_script(template, base_name, &options),
+        Ok(template) => render_init_script(template, &class_name, &options),
         Err(builtin_error) => match options.template.as_deref() {
             Some(name) => {
                 let Some(template) = resolve_catalog_template(name, &std::env::current_dir()?)?
@@ -273,6 +277,10 @@ pub const INIT_TEMPLATES: &[InitTemplate] = &[
     InitTemplate {
         name: "agent",
         description: "Java agent skeleton",
+    },
+    InitTemplate {
+        name: "test",
+        description: "JUnit test class",
     },
 ];
 
@@ -962,6 +970,7 @@ fn render_init_script(template: InitTemplate, base_name: &str, options: &InitOpt
         "compact" => render_compact_init_script(options),
         "cli" => render_cli_init_script(base_name, options),
         "agent" => render_agent_init_script(base_name, options),
+        "test" => render_test_init_script(base_name, options),
         "hello" | "java" => render_hello_init_script(base_name, options),
         _ => unreachable!("template was validated"),
     }
@@ -1121,6 +1130,33 @@ class {base_name} implements Callable<Integer> {{
     out
 }
 
+fn render_test_init_script(base_name: &str, options: &InitOptions) -> String {
+    let mut out = String::new();
+    render_header(options, None, &mut out);
+    out.push_str("//DEPS org.junit.jupiter:junit-jupiter-api:5.11.4\n");
+    render_dependency_hint(options, &mut out);
+    out.push_str(&format!(
+        r#"
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+class {base_name} {{
+
+    @Test
+    void greets() {{
+        assertEquals("Hello World", greeting());
+    }}
+
+    private String greeting() {{
+        return "Hello World";
+    }}
+}}
+"#
+    ));
+    out
+}
+
 fn render_agent_init_script(base_name: &str, options: &InitOptions) -> String {
     let mut out = String::new();
     render_header(options, None, &mut out);
@@ -1171,6 +1207,31 @@ public class {base_name} {{
 }}
 "#
     ));
+    out
+}
+
+fn java_class_name_from_stem(stem: &str) -> String {
+    let mut out = String::new();
+    let mut uppercase_next = true;
+    for ch in stem.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
+            if ch == '_' || ch == '-' {
+                uppercase_next = true;
+                continue;
+            }
+            if uppercase_next {
+                out.extend(ch.to_uppercase());
+                uppercase_next = false;
+            } else {
+                out.push(ch);
+            }
+        } else {
+            uppercase_next = true;
+        }
+    }
+    if out.is_empty() || out.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        out.insert_str(0, "Test");
+    }
     out
 }
 
